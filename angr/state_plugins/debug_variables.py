@@ -174,7 +174,8 @@ class SimDebugVariablePlugin(SimStatePlugin):
         try:
             return self._dwarf_cfa
         except AttributeError:
-            return self.dwarf_cfa_approx
+            self._dwarf_cfa = self.dwarf_cfa_call_frame
+            return self._dwarf_cfa
 
     @dwarf_cfa.setter
     def dwarf_cfa(self, new_val):
@@ -188,6 +189,36 @@ class SimDebugVariablePlugin(SimStatePlugin):
         elif self.state.arch.name == 'X86':
             return self.state.regs.ebp + 8
         return 0
+
+    @property
+    def dwarf_cfa_call_frame(self):
+        ld = self.state.project.loader
+        #find the elf object that state is in
+        wanted_object = None
+        for elf_object in ld.all_elf_objects:
+            if elf_object.min_addr <= self.state.addr < elf_object.max_addr:
+                wanted_object = elf_object
+                break
+        if wanted_object is None:
+            return self.dwarf_cfa_approx
+        #find the fde that the state is in
+        wanted_fde = None
+        mapped_base = wanted_object.mapped_base
+        for fde in wanted_object.fde_hints:
+            if fde.low_pc + mapped_base <= self.state.addr < fde.high_pc + mapped_base:
+                wanted_fde = fde
+                break
+        if wanted_fde is None:
+            return self.dwarf_cfa_approx
+        #find the rule that applied to state according to DWARF specification
+        wantedRule = None
+        for cfaRule in wanted_fde.table:
+            if cfaRule.low_pc + mapped_base <= self.state.addr < cfaRule.high_pc + mapped_base:
+                wantedRule = cfaRule
+                break
+        if wantedRule is None or wantedRule.reg is None:
+            return self.dwarf_cfa_approx
+        return getattr(self.state.regs, wantedRule.reg) + wantedRule.offset
 
 
 SimState.register_default('dvars', SimDebugVariablePlugin)
