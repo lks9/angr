@@ -34,11 +34,6 @@ class SimDebugVariable:
         return SimDebugVariable(state, addr, var_type)
 
     @property
-    def deref(self) -> "SimDebugVariable":
-        # dereferincing is equivalent to getting the first array element
-        return self.array(0)
-
-    @property
     def mem_untyped(self) -> "SimMemView":
         if self.addr is None:
             raise Exception("Cannot view a variable without an address")
@@ -64,6 +59,8 @@ class SimDebugVariable:
             sim_type = SimTypeReg(size, label=name)
         return self.mem_untyped.with_type(sim_type)
 
+    # methods and properties equivalent to SimMemView
+
     @property
     def string(self) -> "SimMemView":
         first_char = self.deref
@@ -74,8 +71,19 @@ class SimDebugVariable:
         return self.mem_untyped.with_type(sim_type)
 
     @property
+    def resolvable(self):
+        return self.mem.resolvable
+
+    @property
     def resolved(self):
         return self.mem.resolved
+
+    @property
+    def concrete(self):
+        return self.mem.concrete
+
+    def store(self, value):
+        return self.mem.store(value)
 
     def __getitem__(self, i):
         if isinstance(i, int):
@@ -83,6 +91,11 @@ class SimDebugVariable:
         elif isinstance(i, str):
             return self.member(i)
         raise KeyError
+
+    @property
+    def deref(self) -> "SimDebugVariable":
+        # dereferincing is equivalent to getting the first array element
+        return self.array(0)
 
     def array(self, i) -> "SimDebugVariable":
         if isinstance(self.type, TypedefType):
@@ -135,7 +148,7 @@ class SimDebugVariablePlugin(SimStatePlugin):
     Example:
         >>> p = angr.Project("various_variables", load_debug_info=True)
         >>> p.kb.dvars.load_from_dwarf()
-        >>> state =  # navigate to the location you want
+        >>> state =  # navigate to the state you want
         >>> state.dvars.get_variable("pointer2").deref.mem
         <int (32 bits) <BV32 0x1> at 0x404020>
     """
