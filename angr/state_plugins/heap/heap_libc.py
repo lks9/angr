@@ -1,5 +1,6 @@
 from . import SimHeapBase
 
+
 class SimHeapLibc(SimHeapBase):
     """
     A class of heap that implements the major libc heap management functions.
@@ -12,17 +13,15 @@ class SimHeapLibc(SimHeapBase):
         :param sim_size: the amount of memory (in bytes) to be allocated
         :returns:        the address of the allocation, or a NULL pointer if the allocation failed
         """
-        raise NotImplementedError("{} not implemented for {}".format(self.malloc.__func__.__name__,
-                                                                 self.__class__.__name__))
+        raise NotImplementedError(f"{self.malloc.__func__.__name__} not implemented for {self.__class__.__name__}")
 
-    def free(self, ptr):  #pylint:disable=unused-argument
+    def free(self, ptr):  # pylint:disable=unused-argument
         """
         A somewhat faithful implementation of libc `free`.
 
         :param ptr: the location in memory to be freed
         """
-        raise NotImplementedError("{} not implemented for {}".format(self.free.__func__.__name__,
-                                                                 self.__class__.__name__))
+        raise NotImplementedError(f"{self.free.__func__.__name__} not implemented for {self.__class__.__name__}")
 
     def calloc(self, sim_nmemb, sim_size):
         """
@@ -32,8 +31,7 @@ class SimHeapLibc(SimHeapBase):
         :param     sim_size: the size of each element (in bytes)
         :returns:  the address of the allocation, or a NULL pointer if the allocation failed
         """
-        raise NotImplementedError("{} not implemented for {}".format(self.calloc.__func__.__name__,
-                                                                 self.__class__.__name__))
+        raise NotImplementedError(f"{self.calloc.__func__.__name__} not implemented for {self.__class__.__name__}")
 
     def realloc(self, ptr, size):
         """
@@ -44,5 +42,4 @@ class SimHeapLibc(SimHeapBase):
         :returns:    the address of the allocation, or a NULL pointer if the allocation was freed or if no new allocation
                      was made
         """
-        raise NotImplementedError("{} not implemented for {}".format(self.realloc.__func__.__name__,
-                                                                 self.__class__.__name__))
+        raise NotImplementedError(f"{self.realloc.__func__.__name__} not implemented for {self.__class__.__name__}")

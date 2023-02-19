@@ -8,6 +8,7 @@ from .stack_canary_simplifier import StackCanarySimplifier
 from .base_ptr_save_simplifier import BasePointerSaveSimplifier
 from .expr_op_swapper import ExprOpSwapper
 from .ite_expr_converter import ITEExprConverter
+from .lowered_switch_simplifier import LoweredSwitchSimplifier
 from .multi_simplifier import MultiSimplifier
 from .div_simplifier import DivSimplifier
 from .mod_simplifier import ModSimplifier
@@ -28,10 +29,12 @@ _all_optimization_passes = [
     (ConstantDereferencesSimplifier, True),
     (RetAddrSaveSimplifier, True),
     (X86GccGetPcSimplifier, True),
+    (LoweredSwitchSimplifier, False),
     (EagerReturnsSimplifier, True),
     (ITEExprConverter, True),
     (ExprOpSwapper, True),
 ]
+
 
 def get_optimization_passes(arch, platform):
 
@@ -41,16 +44,17 @@ def get_optimization_passes(arch, platform):
     if platform is not None:
         platform = platform.lower()
 
-    passes = [ ]
+    passes = []
     for pass_, _ in _all_optimization_passes:
-        if (pass_.ARCHES is None or arch in pass_.ARCHES) \
-                and (pass_.PLATFORMS is None or platform is None or platform in pass_.PLATFORMS):
+        if (pass_.ARCHES is None or arch in pass_.ARCHES) and (
+            pass_.PLATFORMS is None or platform is None or platform in pass_.PLATFORMS
+        ):
             passes.append(pass_)
 
     return passes
 
 
-def get_default_optimization_passes(arch: Union[Arch,str], platform: Optional[str]):
+def get_default_optimization_passes(arch: Union[Arch, str], platform: Optional[str]):
 
     if isinstance(arch, Arch):
         arch = arch.name
@@ -58,12 +62,13 @@ def get_default_optimization_passes(arch: Union[Arch,str], platform: Optional[st
     if platform is not None:
         platform = platform.lower()
 
-    passes = [ ]
+    passes = []
     for pass_, default in _all_optimization_passes:
         if not default:
             continue
-        if (pass_.ARCHES is None or arch in pass_.ARCHES) \
-                and (pass_.PLATFORMS is None or platform is None or platform in pass_.PLATFORMS):
+        if (pass_.ARCHES is None or arch in pass_.ARCHES) and (
+            pass_.PLATFORMS is None or platform is None or platform in pass_.PLATFORMS
+        ):
             passes.append(pass_)
 
     return passes

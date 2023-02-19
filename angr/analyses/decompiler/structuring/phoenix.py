@@ -7,7 +7,7 @@ import networkx
 
 import claripy
 from ailment.block import Block
-from ailment.statement import ConditionalJump, Jump
+from ailment.statement import ConditionalJump, Jump, Label
 from ailment.expression import Const, UnaryOp
 
 from ....knowledge_plugins.cfg import IndirectJumpType
@@ -15,9 +15,29 @@ from ....utils.graph import dominates, inverted_idoms, to_acyclic_graph
 from ...cfg.cfg_utils import CFGUtils
 from ..sequence_walker import SequenceWalker
 from ..condition_processor import ConditionProcessor
-from ..utils import remove_last_statement, extract_jump_targets, switch_extract_cmp_bounds, is_empty_node
-from .structurer_nodes import ConditionNode, SequenceNode, LoopNode, ConditionalBreakNode, BreakNode, ContinueNode, \
-    BaseNode, MultiNode, SwitchCaseNode, IncompleteSwitchCaseNode, EmptyBlockNotice
+from ..optimization_passes.lowered_switch_simplifier import LoweredSwitchSimplifier
+from ..utils import (
+    remove_last_statement,
+    extract_jump_targets,
+    switch_extract_cmp_bounds,
+    is_empty_or_label_only_node,
+    has_nonlabel_statements,
+    first_nonlabel_statement,
+)
+from .structurer_nodes import (
+    ConditionNode,
+    SequenceNode,
+    LoopNode,
+    ConditionalBreakNode,
+    BreakNode,
+    ContinueNode,
+    BaseNode,
+    MultiNode,
+    SwitchCaseNode,
+    IncompleteSwitchCaseNode,
+    EmptyBlockNotice,
+    IncompleteSwitchCaseHeadStatement,
+)
 from .structurer_base import StructurerBase
 
 if TYPE_CHECKING:
@@ -27,37 +47,69 @@ l = logging.getLogger(__name__)
 _DEBUG = False
 
 
+class GraphChangedNotification(Exception):
+    """
+    A notification for graph that is currently worked on being changed. Once this notification is caught, the graph
+    schema matching process for the current region restarts.
+    """
+
+    pass
+
+
 class PhoenixStructurer(StructurerBase):
     """
     Structure a region using a structuring algorithm that is similar to the one in Phoenix decompiler (described in the
     "phoenix decompiler" paper). Note that this implementation has quite a few improvements over the original described
     version and *should not* be used to evaluate the performance of the original algorithm described in that paper.
     """
-    def __init__(self, region, parent_map=None, condition_processor=None, func: Optional['Function']=None,
-                 case_entry_to_switch_head: Optional[Dict[int,int]]=None, parent_region=None, improve_structurer=True):
-        super().__init__(region, parent_map=parent_map, condition_processor=condition_processor, func=func,
-                         case_entry_to_switch_head=case_entry_to_switch_head, parent_region=parent_region,
-                         improve_structurer=improve_structurer)
+
+    NAME = "phoenix"
+
+    def __init__(
+        self,
+        region,
+        parent_map=None,
+        condition_processor=None,
+        func: Optional["Function"] = None,
+        case_entry_to_switch_head: Optional[Dict[int, int]] = None,
+        parent_region=None,
+        improve_structurer=True,
+    ):
+        super().__init__(
+            region,
+            parent_map=parent_map,
+            condition_processor=condition_processor,
+            func=func,
+            case_entry_to_switch_head=case_entry_to_switch_head,
+            parent_region=parent_region,
+            improve_structurer=improve_structurer,
+        )
 
         # whitelist certain edges. removing these edges will destroy critical schemas, which will impact future
         # structuring cycles.
         # the set is populated during the analysis. _last_resort_refinement() will ensure not to remove any edges
         # who fall into these sets.
-        self.whitelist_edges: Set[Tuple[int,int]] = set()
+        self.whitelist_edges: Set[Tuple[int, int]] = set()
 
         self._phoenix_improved = self._improve_structurer
-        self._edge_virtualization_hints = [ ]
+        self._edge_virtualization_hints = []
 
         self._analyze()
 
     @staticmethod
     def _assert_graph_ok(g, msg: str) -> None:
-        assert not _DEBUG or len(list(networkx.connected_components(networkx.Graph(g)))) <= 1, f"{msg} Please report this."
+        if _DEBUG:
+            assert (
+                len(list(networkx.connected_components(networkx.Graph(g)))) <= 1
+            ), f"{msg}: More than one connected component. Please report this."
+            assert (
+                len([nn for nn in g if g.in_degree[nn] == 0]) <= 1
+            ), f"{msg}: More than one graph entrance. Please report this."
 
     def _analyze(self):
         # iterate until there is only one node in the region
 
-        self._assert_graph_ok(self._region.graph, "Incorrect region graph (with more than one connected component).")
+        self._assert_graph_ok(self._region.graph, "Incorrect region graph")
 
         has_cycle = self._has_cycle()
 
@@ -69,23 +121,26 @@ class PhoenixStructurer(StructurerBase):
             progressed = self._analyze_acyclic()
             if progressed and self._region.head not in self._region.graph:
                 # update the head
-                self._region.head = next(iter(node for node in self._region.graph.nodes
-                                              if node.addr == self._region.head.addr))
+                self._region.head = next(
+                    iter(node for node in self._region.graph.nodes if node.addr == self._region.head.addr)
+                )
 
             if has_cycle:
                 progressed |= self._analyze_cyclic()
                 if progressed:
                     if self._region.head not in self._region.graph:
                         # update the loop head
-                        self._region.head = next(iter(node for node in self._region.graph.nodes
-                                                      if node.addr == self._region.head.addr))
+                        self._region.head = next(
+                            iter(node for node in self._region.graph.nodes if node.addr == self._region.head.addr)
+                        )
                 else:
                     refined = self._refine_cyclic()
                     if refined:
                         if self._region.head not in self._region.graph:
                             # update the loop head
-                            self._region.head = next(iter(node for node in self._region.graph.nodes
-                                                          if node.addr == self._region.head.addr))
+                            self._region.head = next(
+                                iter(node for node in self._region.graph.nodes if node.addr == self._region.head.addr)
+                            )
                         has_cycle = self._has_cycle()
                         continue
                 has_cycle = self._has_cycle()
@@ -95,9 +150,11 @@ class PhoenixStructurer(StructurerBase):
                 removed_edge = self._last_resort_refinement(
                     self._region.head,
                     self._region.graph,
-                    self._region.graph_with_successors if self._region.graph_with_successors is not None
+                    self._region.graph_with_successors
+                    if self._region.graph_with_successors is not None
                     else networkx.DiGraph(self._region.graph),
                 )
+                self._assert_graph_ok(self._region.graph, "Last resort refinement went wrong")
                 if not removed_edge:
                     # cannot make any progress in this region. return the subgraph directly
                     break
@@ -120,30 +177,26 @@ class PhoenixStructurer(StructurerBase):
                 self._region.graph,
                 self._region.graph_with_successors
                 if self._region.graph_with_successors is not None
-                else networkx.DiGraph(self._region.graph)
+                else networkx.DiGraph(self._region.graph),
             )
             l.debug("... matching cyclic schemas: %s at %r", matched, node)
             any_matches |= matched
-            self._assert_graph_ok(self._region.graph, "Removed incorrect edges.")
+            self._assert_graph_ok(self._region.graph, "Removed incorrect edges")
         return any_matches
 
     def _match_cyclic_schemas(self, node, head, graph, full_graph) -> bool:
-        matched, loop_node = self._match_cyclic_while(node, head, graph, full_graph)
+        matched, loop_node, successor_node = self._match_cyclic_while(node, head, graph, full_graph)
         if matched:
-            if len(self._region.successors) == 1:
-                # traverse this node and rewrite all conditional jumps that go outside the loop to breaks
-                self._rewrite_conditional_jumps_to_breaks(loop_node.sequence_node,
-                                                          [ succ.addr for succ in self._region.successors ])
+            # traverse this node and rewrite all conditional jumps that go outside the loop to breaks
+            self._rewrite_conditional_jumps_to_breaks(loop_node.sequence_node, [successor_node.addr])
             # traverse this node and rewrite all jumps that go to the beginning of the loop to continue
             self._rewrite_jumps_to_continues(loop_node.sequence_node)
             return True
 
-        matched, loop_node = self._match_cyclic_dowhile(node, head, graph, full_graph)
+        matched, loop_node, successor_node = self._match_cyclic_dowhile(node, head, graph, full_graph)
         if matched:
-            if len(self._region.successors) == 1:
-                # traverse this node and rewrite all conditional jumps that go outside the loop to breaks
-                self._rewrite_conditional_jumps_to_breaks(loop_node.sequence_node,
-                                                          [ succ.addr for succ in self._region.successors ])
+            # traverse this node and rewrite all conditional jumps that go outside the loop to breaks
+            self._rewrite_conditional_jumps_to_breaks(loop_node.sequence_node, [successor_node.addr])
             # traverse this node and rewrite all jumps that go to the beginning of the loop to continue
             self._rewrite_jumps_to_continues(loop_node.sequence_node)
             return True
@@ -152,13 +205,14 @@ class PhoenixStructurer(StructurerBase):
         if matched:
             if len(self._region.successors) == 1:
                 # traverse this node and rewrite all conditional jumps that go outside the loop to breaks
-                self._rewrite_conditional_jumps_to_breaks(loop_node.sequence_node,
-                                                          [ succ.addr for succ in self._region.successors ])
+                self._rewrite_conditional_jumps_to_breaks(
+                    loop_node.sequence_node, [succ.addr for succ in self._region.successors]
+                )
             # traverse this node and rewrite all jumps that go to the beginning of the loop to continue
             self._rewrite_jumps_to_continues(loop_node.sequence_node)
         return matched
 
-    def _match_cyclic_while(self, node, head, graph, full_graph) -> Tuple[bool,Optional[LoopNode]]:
+    def _match_cyclic_while(self, node, head, graph, full_graph) -> Tuple[bool, Optional[LoopNode], Optional[BaseNode]]:
         succs = list(full_graph.successors(node))
         if len(succs) == 2:
             left, right = succs
@@ -182,20 +236,24 @@ class PhoenixStructurer(StructurerBase):
                     # 07 | 0x4058c8 | Goto(0x4058ca<64>)
                     _, head_block = self._find_node_going_to_dst(node, right)
 
-                if (isinstance(head_block, MultiNode) and head_block.nodes
-                        and isinstance(head_block.nodes[0], Block) and head_block.nodes[0].statements
-                        and isinstance(head_block.nodes[0].statements[0], ConditionalJump)
-                        or isinstance(head_block, Block)
-                        and head_block.statements
-                        and isinstance(head_block.statements[0], ConditionalJump)):
+                if (
+                    isinstance(head_block, MultiNode)
+                    and head_block.nodes
+                    and isinstance(head_block.nodes[0], Block)
+                    and head_block.nodes[0].statements
+                    and isinstance(first_nonlabel_statement(head_block.nodes[0]), ConditionalJump)
+                    or isinstance(head_block, Block)
+                    and head_block.statements
+                    and isinstance(first_nonlabel_statement(head_block), ConditionalJump)
+                ):
                     # otherwise it's a do-while loop
                     edge_cond_left = self.cond_proc.recover_edge_condition(full_graph, head_block, left)
                     edge_cond_right = self.cond_proc.recover_edge_condition(full_graph, head_block, right)
                     if claripy.is_true(claripy.Not(edge_cond_left) == edge_cond_right):
                         # c = !c
-                        self._remove_last_statement_if_jump(node)
+                        self._remove_first_statement_if_jump(node)
                         seq_node = SequenceNode(node.addr, nodes=[node]) if not isinstance(node, SequenceNode) else node
-                        loop_node = LoopNode('while', edge_cond_left, seq_node, addr=seq_node.addr)
+                        loop_node = LoopNode("while", edge_cond_left, seq_node, addr=seq_node.addr)
                         self.replace_nodes(graph, node, loop_node, self_loop=False)
                         self.replace_nodes(full_graph, node, loop_node, self_loop=False)
 
@@ -203,53 +261,27 @@ class PhoenixStructurer(StructurerBase):
                         self._remove_edges_except(graph, loop_node, right)
                         self._remove_edges_except(full_graph, loop_node, right)
 
-                        return True, loop_node
-            elif full_graph.has_edge(left, node) \
-                    and left is not head and full_graph.in_degree[left] == 1 and full_graph.out_degree[left] >= 1 \
-                    and not full_graph.has_edge(right, node):
+                        return True, loop_node, right
+            elif (
+                full_graph.has_edge(left, node)
+                and left is not head
+                and full_graph.in_degree[left] == 1
+                and full_graph.out_degree[left] == 1
+                and not full_graph.has_edge(right, node)
+            ):
 
-                if PhoenixStructurer._is_single_statement_block(node):
-                    # the single-statement-block check is to ensure we don't execute any code before the conditional
-                    # jump.
-                    # otherwise it's a do-while loop or a natural loop
-
-                    # possible candidate
-                    _, head_block = self._find_node_going_to_dst(node, left)
+                # possible candidate
+                _, head_block = self._find_node_going_to_dst(node, left, condjump_only=True)
+                if head_block is not None:
                     edge_cond_left = self.cond_proc.recover_edge_condition(full_graph, head_block, left)
                     edge_cond_right = self.cond_proc.recover_edge_condition(full_graph, head_block, right)
                     if claripy.is_true(claripy.Not(edge_cond_left) == edge_cond_right):
                         # c = !c
-                        self._remove_last_statement_if_jump(node)
-                        new_node = SequenceNode(node.addr, nodes=[node, left])
-                        loop_node = LoopNode('while', edge_cond_left, new_node,
-                                             addr=node.addr,  # FIXME: Use the instruction address of the last instruction in head
-                                             )
-
-                        # on the original graph
-                        self.replace_nodes(graph, node, loop_node, old_node_1=left, self_loop=False)
-                        # on the graph with successors
-                        self.replace_nodes(full_graph, node, loop_node, old_node_1=left, self_loop=False)
-
-                        # ensure the loop has only one successor: the right node
-                        self._remove_edges_except(graph, loop_node, right)
-                        self._remove_edges_except(full_graph, loop_node, right)
-
-                        return True, loop_node
-
-                elif self._phoenix_improved:
-                    if full_graph.out_degree[node] == 1:
-                        # while (true) { ...; if (...) break; }
-                        _, head_block = self._find_node_going_to_dst(node, left)
-                        edge_cond_left = self.cond_proc.recover_edge_condition(full_graph, head_block, left)
-                        edge_cond_right = self.cond_proc.recover_edge_condition(full_graph, head_block, right)
-                        if claripy.is_true(claripy.Not(edge_cond_left) == edge_cond_right):
-                            # c = !c
-                            self._remove_last_statement_if_jump(node)
-                            cond_break = ConditionalBreakNode(node.addr, edge_cond_right, right.addr)
-                            new_node = SequenceNode(node.addr, nodes=[node, cond_break, left])
-                            loop_node = LoopNode('while', claripy.true, new_node,
-                                                 addr=node.addr,  # FIXME: Use the instruction address of the last instruction in head
-                                                 )
+                        if PhoenixStructurer._is_single_statement_block(node):
+                            # the single-statement-block check is to ensure we don't execute any code before the
+                            # conditional jump. this way the entire node can be dropped.
+                            new_node = SequenceNode(node.addr, nodes=[left])
+                            loop_node = LoopNode("while", edge_cond_left, new_node, addr=node.addr)
 
                             # on the original graph
                             self.replace_nodes(graph, node, loop_node, old_node_1=left, self_loop=False)
@@ -260,11 +292,62 @@ class PhoenixStructurer(StructurerBase):
                             self._remove_edges_except(graph, loop_node, right)
                             self._remove_edges_except(full_graph, loop_node, right)
 
-                            return True, loop_node
+                            return True, loop_node, right
+                        else:
+                            # we generate a while-true loop instead
+                            last_stmt = self._remove_last_statement_if_jump(head_block)
+                            cond_jump = Jump(
+                                None,
+                                Const(None, None, right.addr, self.project.arch.bits),
+                                None,
+                                ins_addr=last_stmt.ins_addr,
+                            )
+                            jump_node = Block(last_stmt.ins_addr, None, statements=[cond_jump])
+                            cond_jump_node = ConditionNode(last_stmt.ins_addr, None, edge_cond_right, jump_node)
+                            new_node = SequenceNode(node.addr, nodes=[node, cond_jump_node, left])
+                            loop_node = LoopNode("while", claripy.true, new_node, addr=node.addr)
 
-        return False, None
+                            # on the original graph
+                            self.replace_nodes(graph, node, loop_node, old_node_1=left, self_loop=False)
+                            # on the graph with successors
+                            self.replace_nodes(full_graph, node, loop_node, old_node_1=left, self_loop=False)
 
-    def _match_cyclic_dowhile(self, node, head, graph, full_graph) -> Tuple[bool,Optional[LoopNode]]:
+                            # ensure the loop has only one successor: the right node
+                            self._remove_edges_except(graph, loop_node, right)
+                            self._remove_edges_except(full_graph, loop_node, right)
+
+                            return True, loop_node, right
+
+                if self._phoenix_improved:
+                    if full_graph.out_degree[node] == 1:
+                        # while (true) { ...; if (...) break; }
+                        _, head_block = self._find_node_going_to_dst(node, left, condjump_only=True)
+                        if head_block is not None:
+                            edge_cond_left = self.cond_proc.recover_edge_condition(full_graph, head_block, left)
+                            edge_cond_right = self.cond_proc.recover_edge_condition(full_graph, head_block, right)
+                            if claripy.is_true(claripy.Not(edge_cond_left) == edge_cond_right):
+                                # c = !c
+                                self._remove_last_statement_if_jump(head_block)
+                                cond_break = ConditionalBreakNode(node.addr, edge_cond_right, right.addr)
+                                new_node = SequenceNode(node.addr, nodes=[node, cond_break, left])
+                                loop_node = LoopNode("while", claripy.true, new_node, addr=node.addr)
+
+                                # on the original graph
+                                self.replace_nodes(graph, node, loop_node, old_node_1=left, self_loop=False)
+                                # on the graph with successors
+                                self.replace_nodes(full_graph, node, loop_node, old_node_1=left, self_loop=False)
+
+                                # ensure the loop has only one successor: the right node
+                                self._remove_edges_except(graph, loop_node, right)
+                                self._remove_edges_except(full_graph, loop_node, right)
+
+                                return True, loop_node, right
+
+        return False, None, None
+
+    def _match_cyclic_dowhile(
+        self, node, head, graph, full_graph
+    ) -> Tuple[bool, Optional[LoopNode], Optional[BaseNode]]:
         preds = list(full_graph.predecessors(node))
         succs = list(full_graph.successors(node))
         if ((node is head and len(preds) >= 1) or len(preds) >= 2) and len(succs) == 1:
@@ -278,7 +361,7 @@ class PhoenixStructurer(StructurerBase):
                 if full_graph.has_edge(succ, node):
 
                     # possible candidate
-                    _, succ_block = self._find_node_going_to_dst(succ, out_node)
+                    _, succ_block = self._find_node_going_to_dst(succ, out_node, condjump_only=True)
                     if succ_block is not None:
                         edge_cond_succhead = self.cond_proc.recover_edge_condition(full_graph, succ_block, node)
                         edge_cond_succout = self.cond_proc.recover_edge_condition(full_graph, succ_block, out_node)
@@ -286,16 +369,14 @@ class PhoenixStructurer(StructurerBase):
                             # c = !c
                             self._remove_last_statement_if_jump(succ)
                             new_node = SequenceNode(node.addr, nodes=[node, succ])
-                            loop_node = LoopNode('do-while', edge_cond_succhead, new_node,
-                                                 addr=node.addr,  # FIXME: Use the instruction address of the last instruction in head
-                                                 )
+                            loop_node = LoopNode("do-while", edge_cond_succhead, new_node, addr=node.addr)
 
                             # on the original graph
                             self.replace_nodes(graph, node, loop_node, old_node_1=succ, self_loop=False)
                             # on the graph with successors
                             self.replace_nodes(full_graph, node, loop_node, old_node_1=succ, self_loop=False)
 
-                            return True, loop_node
+                            return True, loop_node, out_node
         elif ((node is head and len(preds) >= 1) or len(preds) >= 2) and len(succs) == 2 and node in succs:
             # head forms a self-loop
             succs.remove(node)
@@ -308,22 +389,22 @@ class PhoenixStructurer(StructurerBase):
                     # c = !c
                     self._remove_last_statement_if_jump(node)
                     seq_node = SequenceNode(node.addr, nodes=[node]) if not isinstance(node, SequenceNode) else node
-                    loop_node = LoopNode('do-while', edge_cond_head, seq_node, addr=seq_node.addr)
+                    loop_node = LoopNode("do-while", edge_cond_head, seq_node, addr=seq_node.addr)
 
                     # on the original graph
                     self.replace_nodes(graph, node, loop_node, self_loop=False)
                     # on the graph with successors
                     self.replace_nodes(full_graph, node, loop_node, self_loop=False)
 
-                    return True, loop_node
-        return False, None
+                    return True, loop_node, succ
+        return False, None, None
 
-    def _match_cyclic_natural_loop(self, node, head, graph, full_graph) -> Tuple[bool,Optional[LoopNode]]:
+    def _match_cyclic_natural_loop(self, node, head, graph, full_graph) -> Tuple[bool, Optional[LoopNode]]:
 
         if not (node is head or graph.in_degree[node] == 2):
             return False, None
 
-        # check if there is a cycle that starts with head and ends with head
+        # check if there is a cycle that starts with node and ends with node
         next_node = node
         seq_node = SequenceNode(node.addr, nodes=[node])
         seen_nodes = set()
@@ -341,7 +422,7 @@ class PhoenixStructurer(StructurerBase):
             seen_nodes.add(next_node)
             seq_node.nodes.append(next_node)
 
-        loop_node = LoopNode('while', claripy.true, seq_node, addr=node.addr)
+        loop_node = LoopNode("while", claripy.true, seq_node, addr=node.addr)
 
         # on the original graph
         for node_ in seq_node.nodes:
@@ -368,8 +449,8 @@ class PhoenixStructurer(StructurerBase):
 
         # check if there is an out-going edge from the loop head
         head_succs = list(fullgraph.successors(loop_head))
-        headgoing_edges: List[Tuple[BaseNode,BaseNode]] = [ ]
-        outgoing_edges = [ ]
+        headgoing_edges: List[Tuple[BaseNode, BaseNode]] = []
+        outgoing_edges = []
         successor = None  # the loop successor
         loop_type = None
         if len(head_succs) == 2 and any(head_succ not in graph for head_succ in head_succs):
@@ -446,8 +527,9 @@ class PhoenixStructurer(StructurerBase):
                     # pick one successor with the highest edge count and (in case there are multiple successors with the
                     # same edge count) the lowest address
                     max_edgecount = max(successor_and_edgecounts.values())
-                    successor_candidates = [nn for nn, edgecount in successor_and_edgecounts.items()
-                                            if edgecount == max_edgecount]
+                    successor_candidates = [
+                        nn for nn, edgecount in successor_and_edgecounts.items() if edgecount == max_edgecount
+                    ]
                     successor = next(iter(sorted(successor_candidates, key=lambda x: x.addr)))
                 else:
                     successor = next(iter(successor_and_edgecounts.keys()))
@@ -460,8 +542,11 @@ class PhoenixStructurer(StructurerBase):
                     # and augment the corresponding block with a ConditionalBreak.
                     src_parent, src_block = self._find_node_going_to_dst(src, dst)
                     if src_block is None:
-                        l.warning("Cannot find the source block jumping to the destination block at %#x. "
-                                  "This is likely a bug elsewhere and needs to be addressed.", dst.addr)
+                        l.warning(
+                            "Cannot find the source block jumping to the destination block at %#x. "
+                            "This is likely a bug elsewhere and needs to be addressed.",
+                            dst.addr,
+                        )
                         # remove the edge anyway
                         fullgraph.remove_edge(src, dst)
                     elif not isinstance(src_block, (Block, MultiNode)):
@@ -484,12 +569,20 @@ class PhoenixStructurer(StructurerBase):
                         last_src_stmt = self.cond_proc.get_last_statement(src_block)
                         break_cond = self.cond_proc.recover_edge_condition(fullgraph, src_block, dst)
                         if claripy.is_true(break_cond):
-                            break_stmt = Jump(None, Const(None, None, successor.addr, self.project.arch.bits), None,
-                                              ins_addr=last_src_stmt.ins_addr)
+                            break_stmt = Jump(
+                                None,
+                                Const(None, None, successor.addr, self.project.arch.bits),
+                                None,
+                                ins_addr=last_src_stmt.ins_addr,
+                            )
                             break_node = Block(last_src_stmt.ins_addr, None, statements=[break_stmt])
                         else:
-                            break_stmt = Jump(None, Const(None, None, successor.addr, self.project.arch.bits), None,
-                                              ins_addr=last_src_stmt.ins_addr)
+                            break_stmt = Jump(
+                                None,
+                                Const(None, None, successor.addr, self.project.arch.bits),
+                                None,
+                                ins_addr=last_src_stmt.ins_addr,
+                            )
                             break_node_inner = Block(last_src_stmt.ins_addr, None, statements=[break_stmt])
                             break_node = ConditionNode(
                                 last_src_stmt.ins_addr,
@@ -501,17 +594,18 @@ class PhoenixStructurer(StructurerBase):
                         if has_continue:
                             if self.is_a_jump_target(last_src_stmt, loop_head.addr):
                                 # instead of a conditional break node, we should insert a condition node instead
-                                break_stmt = Jump(None, Const(None, None, successor.addr, self.project.arch.bits), None,
-                                                  ins_addr=last_src_stmt.ins_addr)
-                                break_node = Block(last_src_stmt.ins_addr, None, statements=[break_stmt])
-                                cont_node = ContinueNode(last_src_stmt.ins_addr,
-                                                         Const(None, None, loop_head.addr, self.project.arch.bits))
-                                cond_node = ConditionNode(
-                                    last_src_stmt.ins_addr,
+                                break_stmt = Jump(
                                     None,
-                                    break_cond,
-                                    break_node,
-                                    false_node=cont_node
+                                    Const(None, None, successor.addr, self.project.arch.bits),
+                                    None,
+                                    ins_addr=last_src_stmt.ins_addr,
+                                )
+                                break_node = Block(last_src_stmt.ins_addr, None, statements=[break_stmt])
+                                cont_node = ContinueNode(
+                                    last_src_stmt.ins_addr, Const(None, None, loop_head.addr, self.project.arch.bits)
+                                )
+                                cond_node = ConditionNode(
+                                    last_src_stmt.ins_addr, None, break_cond, break_node, false_node=cont_node
                                 )
                                 new_node.nodes[-1] = cond_node
                                 graph.remove_edge(src, loop_head)
@@ -522,8 +616,6 @@ class PhoenixStructurer(StructurerBase):
                                 # we don't handle it here.
                                 pass
 
-                        remove_last_statement(src_block)  # remove the last jump or conditional jump in src_block
-
                         fullgraph.remove_edge(src, dst)
                         if src_parent is not None:
                             # replace the node in its parent node
@@ -532,73 +624,95 @@ class PhoenixStructurer(StructurerBase):
                             # directly replace the node in graph
                             self.replace_nodes(graph, src, new_node)
                             self.replace_nodes(fullgraph, src, new_node)
+                            if src is loop_head:
+                                loop_head = new_node
+
+                        self._replace_node_in_edge_list(outgoing_edges, src_block, new_node)
+                        self._replace_node_in_edge_list(headgoing_edges, src_block, new_node)
+
+                        # remove the last jump or conditional jump in src_block
+                        self._remove_last_statement_if_jump(src_block)
 
                 else:
                     fullgraph.remove_edge(src, dst)
 
         if len(headgoing_edges) > 1:
-            # convert all but one (the one with the highest address) head-going edges into continues
-            max_src_addr: int = max(src.addr for src, _ in headgoing_edges)
-            src_to_ignore = next(iter(src for src, _ in headgoing_edges if src.addr == max_src_addr))
+            # convert all but one (the one that is the farthest from the head, topological-wise) head-going edges into
+            # continues
+            sorted_nodes = CFGUtils.quasi_topological_sort_nodes(
+                fullgraph, nodes=[src for src, _ in headgoing_edges], loop_heads=[loop_head]
+            )
+            src_to_ignore = sorted_nodes[-1]
 
             for src, _ in headgoing_edges:
                 if src is src_to_ignore:
-                    last_src_stm = self.cond_proc.get_last_statement(src)
-                    if self.is_a_jump_target(last_src_stm, loop_head.addr):
-                        # remove the last statement (which should be a Jump to the loop head)
-                        remove_last_statement(src)
+                    # this edge will be handled during loop structuring
                     continue
 
                 # due to prior structuring of sub regions, the continue node may already be a Jump statement deep in
                 # src at this point. we need to find the Jump statement and replace it.
-                cont_parent, cont_block = self._find_node_going_to_dst(src, loop_head)
+                _, cont_block = self._find_node_going_to_dst(src, loop_head)
                 if cont_block is None:
                     # cont_block is not found. but it's ok. one possibility is that src is a jump table head with one
                     # case being the loop head. in such cases, we can just remove the edge.
-                    if not src.addr in self.kb.cfgs['CFGFast'].jump_tables:
-                        l.warning("_refine_cyclic_core: Cannot find the block going to loop head for edge %r -> %r."
-                                  "Remove the edge anyway.",
-                                  src, loop_head)
+                    if not src.addr in self.kb.cfgs["CFGFast"].jump_tables:
+                        l.warning(
+                            "_refine_cyclic_core: Cannot find the block going to loop head for edge %r -> %r."
+                            "Remove the edge anyway.",
+                            src,
+                            loop_head,
+                        )
                     if graph.has_edge(src, loop_head):
                         graph.remove_edge(src, loop_head)
                     fullgraph.remove_edge(src, loop_head)
                 else:
-                    # replace cont_block with a ContinueNode
+                    # virtualize the edge. later it will be replaced with a ContinueNode or a conditional continue
                     graph.remove_edge(src, loop_head)
                     fullgraph.remove_edge(src, loop_head)
-
-                    last_cont_stmt = self.cond_proc.get_last_statement(cont_block)
-                    if cont_parent is not None:
-                        remove_last_statement(cont_block)
-                        cont_node = ContinueNode(last_cont_stmt.ins_addr,
-                                                 Const(None, None, loop_head.addr, self.project.arch.bits))
-                        new_node_ = SequenceNode(cont_block.addr, nodes=[cont_block, cont_node])
-                        self.replace_node_in_node(cont_parent, cont_block, new_node_)
-                    else:
-                        cont_node = ContinueNode(last_cont_stmt.ins_addr,
-                                                 Const(None, None, loop_head.addr, self.project.arch.bits))
-                        new_node = SequenceNode(src.addr, nodes=[src, cont_node])
-                        self.replace_nodes(graph, src, new_node)
-                        self.replace_nodes(fullgraph, src, new_node)
 
         return bool(outgoing_edges or len(headgoing_edges) > 1)
 
     def _analyze_acyclic(self) -> bool:
         # match against known schemas
         l.debug("Matching acyclic schemas for region %r.", self._region)
-        return self._match_acyclic_schemas(
-            self._region.graph,
-            self._region.graph_with_successors
-            if self._region.graph_with_successors is not None
-            else networkx.DiGraph(self._region.graph),
-            self._region.head,
-        )
+
+        any_matches = False
+        idx = 0
+        while True:
+            l.debug("_match_acyclic_schemas: Iteration %d", idx)
+            idx += 1
+
+            try:
+                any_matches_this_iteration = self._match_acyclic_schemas(
+                    self._region.graph,
+                    self._region.graph_with_successors
+                    if self._region.graph_with_successors is not None
+                    else networkx.DiGraph(self._region.graph),
+                    self._region.head,
+                )
+            except GraphChangedNotification:
+                # restart
+                l.debug("_match_acyclic_schemas: Graph changed. Restart.")
+                idx = 0
+                continue
+            if not any_matches_this_iteration:
+                break
+            any_matches = True
+
+            # update the head if needed
+            if self._region.head not in self._region.graph:
+                # update the head
+                self._region.head = next(
+                    iter(node for node in self._region.graph.nodes if node.addr == self._region.head.addr)
+                )
+
+        return any_matches
 
     def _match_acyclic_schemas(self, graph: networkx.DiGraph, full_graph: networkx.DiGraph, head) -> bool:
         # traverse the graph in reverse topological order
         any_matches = False
 
-        self._assert_graph_ok(self._region.graph, "Got a wrong graph to work on.")
+        self._assert_graph_ok(self._region.graph, "Got a wrong graph to work on")
 
         if graph.in_degree[head] == 0:
             acyclic_graph = graph
@@ -606,7 +720,7 @@ class PhoenixStructurer(StructurerBase):
             acyclic_graph = networkx.DiGraph(graph)
             acyclic_graph.remove_edges_from(graph.in_edges(head))
 
-            self._assert_graph_ok(acyclic_graph, "Removed wrong edges.")
+            self._assert_graph_ok(acyclic_graph, "Removed wrong edges")
 
         for node in list(reversed(CFGUtils.quasi_topological_sort_nodes(acyclic_graph))):
             if node not in graph:
@@ -618,23 +732,28 @@ class PhoenixStructurer(StructurerBase):
             matched = self._match_acyclic_switch_cases(graph, full_graph, node)
             l.debug("... matched: %s", matched)
             any_matches |= matched
-            if not matched:
-                l.debug("... matching acyclic sequence at %r", node)
-                matched = self._match_acyclic_sequence(graph, full_graph, node)
-                l.debug("... matched: %s", matched)
-                any_matches |= matched
-            if not matched:
-                l.debug("... matching acyclic ITE at %r", node)
-                matched = self._match_acyclic_ite(graph, full_graph, node)
-                l.debug("... matched: %s", matched)
-                any_matches |= matched
+            if matched:
+                break
+            l.debug("... matching acyclic sequence at %r", node)
+            matched = self._match_acyclic_sequence(graph, full_graph, node)
+            l.debug("... matched: %s", matched)
+            any_matches |= matched
+            if matched:
+                break
+            l.debug("... matching acyclic ITE at %r", node)
+            matched = self._match_acyclic_ite(graph, full_graph, node)
+            l.debug("... matched: %s", matched)
+            any_matches |= matched
+            if matched:
+                break
             if self._phoenix_improved:
-                if not matched:
-                    l.debug("... matching acyclic ITE with short-circuit conditions at %r", node)
-                    matched = self._match_acyclic_short_circuit_conditions(graph, full_graph, node)
-                    l.debug("... matched: %s", matched)
-                    any_matches |= matched
-            self._assert_graph_ok(self._region.graph, "Removed incorrect edges.")
+                l.debug("... matching acyclic ITE with short-circuit conditions at %r", node)
+                matched = self._match_acyclic_short_circuit_conditions(graph, full_graph, node)
+                l.debug("... matched: %s", matched)
+                any_matches |= matched
+                if matched:
+                    break
+            self._assert_graph_ok(self._region.graph, "Removed incorrect edges")
         return any_matches
 
     # switch cases
@@ -643,13 +762,69 @@ class PhoenixStructurer(StructurerBase):
         if isinstance(node, (SwitchCaseNode, IncompleteSwitchCaseNode)):
             return False
 
-        jump_tables = self.kb.cfgs['CFGFast'].jump_tables
+        r = self._match_acyclic_switch_cases_incomplete_switch_head(node, graph, full_graph)
+        if r:
+            return r
+        jump_tables = self.kb.cfgs["CFGFast"].jump_tables
         r = self._match_acyclic_switch_cases_address_loaded_from_memory(node, graph, full_graph, jump_tables)
-        if not r:
-            r = self._match_acyclic_switch_cases_address_computed(node, graph, full_graph, jump_tables)
-        if not r:
-            r = self._match_acyclic_incomplete_switch_cases(node, graph, full_graph, jump_tables)
+        if r:
+            return r
+        r = self._match_acyclic_switch_cases_address_computed(node, graph, full_graph, jump_tables)
+        if r:
+            return r
+        r = self._match_acyclic_incomplete_switch_cases(node, graph, full_graph, jump_tables)
         return r
+
+    def _match_acyclic_switch_cases_incomplete_switch_head(self, node, graph, full_graph) -> bool:
+        try:
+            last_stmts = self.cond_proc.get_last_statements(node)
+        except EmptyBlockNotice:
+            return False
+
+        if len(last_stmts) != 1:
+            return False
+        last_stmt = last_stmts[0]
+        if not isinstance(last_stmt, IncompleteSwitchCaseHeadStatement):
+            return False
+
+        # make a fake jumptable
+        node_default_addr = None
+        case_entries: Dict[int, int] = {}
+        for _, case_value, case_target_addr, _ in last_stmt.case_addrs:
+            if isinstance(case_value, str):
+                if case_value == "default":
+                    node_default_addr = case_target_addr
+                    continue
+                raise ValueError(f"Unsupported 'case_value' {case_value}")
+            case_entries[case_value] = case_target_addr
+
+        cases, node_default, to_remove = self._switch_build_cases(
+            case_entries,
+            node,
+            node,
+            node_default_addr,
+            graph,
+            full_graph,
+        )
+        r = self._make_switch_cases_core(
+            node,
+            self.cond_proc.claripy_ast_from_ail_condition(last_stmt.switch_variable),
+            cases,
+            node_default,
+            last_stmt.ins_addr,
+            to_remove,
+            graph,
+            full_graph,
+            can_bail=True,
+        )
+        if not r:
+            # restore the graph to cascading if-then-elses
+            l.warning("Cannot structure as a switch-case. Restore the sub graph to if-elses.")
+            LoweredSwitchSimplifier.restore_graph(node, last_stmt, graph, full_graph)
+            raise GraphChangedNotification()
+
+        self._switch_handle_gotos(cases, node_default, None)
+        return True
 
     def _match_acyclic_switch_cases_address_loaded_from_memory(self, node, graph, full_graph, jump_tables) -> bool:
         try:
@@ -690,12 +865,18 @@ class PhoenixStructurer(StructurerBase):
         self.whitelist_edges.add((node_a.addr, node_b_addr))
 
         # sanity check: case nodes are successors to node_a. all case nodes must have at most common one successor
+        node_pred = None
+        if graph.in_degree[node] == 1:
+            node_pred = list(graph.predecessors(node))[0]
+
         case_nodes = list(graph.successors(node_a))
         case_node_successors = set()
         for case_node in case_nodes:
+            if case_node is node_pred:
+                continue
             if case_node.addr in jump_table.jumptable_entries:
                 succs = set(graph.successors(case_node))
-                case_node_successors |= succs
+                case_node_successors |= {succ for succ in succs if succ.addr not in jump_table.jumptable_entries}
         if len(case_node_successors) > 1:
             return False
 
@@ -711,8 +892,14 @@ class PhoenixStructurer(StructurerBase):
             # update node_a
             node_a = next(iter(nn for nn in graph.nodes if nn.addr == target))
 
-        cases, node_default, to_remove = self._switch_build_cases(cmp_lb, jump_table.jumptable_entries, node, node_a,
-                                                                  node_b_addr, graph, full_graph)
+        cases, node_default, to_remove = self._switch_build_cases(
+            {cmp_lb + i: entry_addr for (i, entry_addr) in enumerate(jump_table.jumptable_entries)},
+            node,
+            node_a,
+            node_b_addr,
+            graph,
+            full_graph,
+        )
 
         if node_default is None:
             switch_end_addr = node_b_addr
@@ -722,8 +909,9 @@ class PhoenixStructurer(StructurerBase):
             to_remove.add(node_default)
 
         to_remove.add(node_a)  # add node_a
-        self._make_switch_cases_core(node, cmp_expr, cases, node_default, last_stmt.ins_addr, to_remove, graph,
-                                     full_graph, node_a=node_a)
+        self._make_switch_cases_core(
+            node, cmp_expr, cases, node_default, last_stmt.ins_addr, to_remove, graph, full_graph, node_a=node_a
+        )
 
         self._switch_handle_gotos(cases, node_default, switch_end_addr)
 
@@ -757,15 +945,19 @@ class PhoenixStructurer(StructurerBase):
             return False
         cmp_expr, cmp_lb, cmp_ub = cmp  # pylint:disable=unused-variable
 
-        jumptable_entries = jump_table.jumptable_entries
-
         if isinstance(last_stmt.false_target, Const):
             default_addr = last_stmt.false_target.value
         else:
             return False
 
-        cases, node_default, to_remove = self._switch_build_cases(cmp_lb, jumptable_entries, node, node, default_addr,
-                                                                  graph, full_graph)
+        cases, node_default, to_remove = self._switch_build_cases(
+            {cmp_lb + i: entry_addr for (i, entry_addr) in enumerate(jump_table.jumptable_entries)},
+            node,
+            node,
+            default_addr,
+            graph,
+            full_graph,
+        )
         if node_default is None:
             # there must be a default case
             return False
@@ -774,14 +966,15 @@ class PhoenixStructurer(StructurerBase):
 
         return True
 
-    def _match_acyclic_incomplete_switch_cases(self, node, graph: networkx.DiGraph, full_graph: networkx.DiGraph,
-                                               jump_tables: Dict) -> bool:
+    def _match_acyclic_incomplete_switch_cases(
+        self, node, graph: networkx.DiGraph, full_graph: networkx.DiGraph, jump_tables: Dict
+    ) -> bool:
         # sanity checks
         if node.addr not in jump_tables:
             return False
         if isinstance(node, IncompleteSwitchCaseNode):
             return False
-        if is_empty_node(node):
+        if is_empty_or_label_only_node(node):
             return False
 
         successors = list(graph.successors(node))
@@ -804,22 +997,24 @@ class PhoenixStructurer(StructurerBase):
                 return True
         return False
 
-    def _switch_build_cases(self, cmp_lb, jumptable_entries, head_node, node_a: BaseNode, node_b_addr, graph,
-                            full_graph) -> Tuple[Dict,Any,Set[Any]]:
-        cases: Dict[Union[int,Tuple[int]],SequenceNode] = { }
+    def _switch_build_cases(
+        self, case_and_entryaddrs: Dict[int, int], head_node, node_a: BaseNode, node_b_addr, graph, full_graph
+    ) -> Tuple[Dict, Any, Set[Any]]:
+        cases: Dict[Union[int, Tuple[int]], SequenceNode] = {}
         to_remove = set()
 
         # it is possible that the default node gets duplicated by other analyses and creates a default node (addr.a)
         # and a case node (addr.b). The addr.a node is a successor to the head node while the addr.b node is a
         # successor to node_a
-        default_node_candidates = [ nn for nn in graph.nodes if nn.addr == node_b_addr ]
+        default_node_candidates = [nn for nn in graph.nodes if nn.addr == node_b_addr]
         if len(default_node_candidates) == 0:
             node_default: Optional[BaseNode] = None
         elif len(default_node_candidates) == 1:
             node_default: Optional[BaseNode] = default_node_candidates[0]
         else:
-            node_default: Optional[BaseNode] = next(iter(nn for nn in default_node_candidates
-                                                         if graph.has_edge(head_node, nn)), None)
+            node_default: Optional[BaseNode] = next(
+                iter(nn for nn in default_node_candidates if graph.has_edge(head_node, nn)), None
+            )
 
         if node_default is not None and not isinstance(node_default, SequenceNode):
             # make the default node a SequenceNode so that we can insert Break and Continue nodes into it later
@@ -829,8 +1024,8 @@ class PhoenixStructurer(StructurerBase):
             node_default = new_node
 
         # entry_addrs_set = set(jumptable_entries)
-        converted_nodes: Dict[int,Any] = { }
-        entry_addr_to_ids: DefaultDict[int,Set[int]] = defaultdict(set)
+        converted_nodes: Dict[int, Any] = {}
+        entry_addr_to_ids: DefaultDict[int, Set[int]] = defaultdict(set)
 
         # the default node might get duplicated (e.g., by EagerReturns). we detect if a duplicate of the default node
         # (node b) is a successor node of node a. we only skip those entries going to the default node if no duplicate
@@ -842,11 +1037,10 @@ class PhoenixStructurer(StructurerBase):
             # the default node is not duplicated
             node_b_in_node_a_successors = False
 
-        for j, entry_addr in enumerate(jumptable_entries):
+        for case_idx, entry_addr in case_and_entryaddrs.items():
             if not node_b_in_node_a_successors and entry_addr == node_b_addr:
                 # jump to default or end of the switch-case structure - ignore this case
                 continue
-            case_idx = cmp_lb + j
 
             entry_addr_to_ids[entry_addr].add(case_idx)
             if entry_addr in converted_nodes:
@@ -856,9 +1050,13 @@ class PhoenixStructurer(StructurerBase):
             if entry_node is None:
                 # Missing entries. They are probably *after* the entire switch-case construct. Replace it with an empty
                 # Goto node.
-                case_inner_node = Block(0, 0, statements=[
-                    Jump(None, Const(None, None, entry_addr, self.project.arch.bits), ins_addr=0, stmt_idx=0)
-                ])
+                case_inner_node = Block(
+                    0,
+                    0,
+                    statements=[
+                        Jump(None, Const(None, None, entry_addr, self.project.arch.bits), ins_addr=0, stmt_idx=0)
+                    ],
+                )
                 case_node = SequenceNode(0, nodes=[case_inner_node])
                 converted_nodes[entry_addr] = case_node
                 continue
@@ -880,9 +1078,19 @@ class PhoenixStructurer(StructurerBase):
 
         return cases, node_default, to_remove
 
-    @staticmethod
-    def _make_switch_cases_core(head, cmp_expr, cases, node_default, addr, to_remove: Set, graph: networkx.DiGraph,
-                                full_graph: networkx.DiGraph, node_a=None):
+    def _make_switch_cases_core(
+        self,
+        head,
+        cmp_expr,
+        cases,
+        node_default,
+        addr,
+        to_remove: Set,
+        graph: networkx.DiGraph,
+        full_graph: networkx.DiGraph,
+        node_a=None,
+        can_bail=False,
+    ) -> bool:
 
         if node_default is not None:
             # the head no longer goes to the default case
@@ -892,8 +1100,8 @@ class PhoenixStructurer(StructurerBase):
         scnode = SwitchCaseNode(cmp_expr, cases, node_default, addr=addr)
 
         # insert the switch-case node to the graph
-        other_nodes_inedges = [ ]
-        out_edges = [ ]
+        other_nodes_inedges = []
+        out_edges = []
 
         # remove all those entry nodes
         if node_default is not None:
@@ -909,6 +1117,12 @@ class PhoenixStructurer(StructurerBase):
                 if dst not in to_remove:
                     out_edges.append((nn, dst))
 
+        if can_bail:
+            nonhead_out_nodes = {edge[1] for edge in out_edges if edge[1] is not head}
+            if len(nonhead_out_nodes) > 1:
+                # not ready to be structured yet - do it later
+                return False
+
         for nn in to_remove:
             graph.remove_node(nn)
             full_graph.remove_node(nn)
@@ -917,14 +1131,32 @@ class PhoenixStructurer(StructurerBase):
         full_graph.add_edge(head, scnode)
 
         if out_edges:
-            # leave only one out edge and virtualize all other out edges
-            out_edge = out_edges[0]
-            out_dst = out_edge[1]
-            if out_dst in graph:
-                graph.add_edge(scnode, out_dst)
-            full_graph.add_edge(scnode, out_dst)
-            if full_graph.has_edge(head, out_dst):
-                full_graph.remove_edge(head, out_dst)
+            # for all out edges going to head, we ensure there is a goto at the end of each corresponding case node
+            for out_src, out_dst in out_edges:
+                if out_dst is head:
+                    case_node: SequenceNode = [
+                        nn for nn in list(cases.values()) + [node_default] if nn.addr == out_src.addr
+                    ][0]
+                    case_node_last_stmt = self.cond_proc.get_last_statement(case_node)
+                    if not isinstance(case_node_last_stmt, Jump):
+                        jump_stmt = Jump(
+                            None, Const(None, None, head.addr, self.project.arch.bits), None, ins_addr=out_src.addr
+                        )
+                        jump_node = Block(out_src.addr, 0, statements=[jump_stmt])
+                        case_node.nodes.append(jump_node)
+                    graph.add_edge(scnode, head)
+                    full_graph.add_edge(scnode, head)
+
+            out_edges = [edge for edge in out_edges if edge[1] is not head]
+            if out_edges:
+                # leave only one out edge and virtualize all other out edges
+                out_edge = out_edges[0]
+                out_dst = out_edge[1]
+                if out_dst in graph:
+                    graph.add_edge(scnode, out_dst)
+                full_graph.add_edge(scnode, out_dst)
+                if full_graph.has_edge(head, out_dst):
+                    full_graph.remove_edge(head, out_dst)
 
         # remove the last statement (conditional jump) in the head node
         remove_last_statement(head)
@@ -932,6 +1164,8 @@ class PhoenixStructurer(StructurerBase):
         if node_a is not None:
             # remove the last statement in node_a
             remove_last_statement(node_a)
+
+        return True
 
     # other acyclic schemas
 
@@ -942,9 +1176,11 @@ class PhoenixStructurer(StructurerBase):
         succs = list(graph.successors(start_node))
         if len(succs) == 1:
             end_node = succs[0]
-            if full_graph.out_degree[start_node] == 1 \
-                    and full_graph.in_degree[end_node] == 1 \
-                    and not full_graph.has_edge(end_node, start_node):
+            if (
+                full_graph.out_degree[start_node] == 1
+                and full_graph.in_degree[end_node] == 1
+                and not full_graph.has_edge(end_node, start_node)
+            ):
                 # merge two blocks
                 new_seq = self._merge_nodes(start_node, end_node)
 
@@ -966,25 +1202,31 @@ class PhoenixStructurer(StructurerBase):
             left_succs = list(full_graph.successors(left))
             right_succs = list(full_graph.successors(right))
 
-            if left in graph and right in graph and (
+            if (
+                left in graph
+                and right in graph
+                and (
                     (not left_succs and not right_succs)
                     or (not left_succs and len(right_succs) == 1)
                     or (not right_succs and len(left_succs) == 1)
                     or (len(left_succs) == 1 and left_succs == right_succs)
+                )
             ):
                 # potentially ITE
-                jump_tables = self.kb.cfgs['CFGFast'].jump_tables
+                jump_tables = self.kb.cfgs["CFGFast"].jump_tables
 
-                if full_graph.in_degree[left] == 1 \
-                        and full_graph.in_degree[right] == 1 \
-                        and left.addr not in jump_tables \
-                        and right.addr not in jump_tables:
+                if (
+                    full_graph.in_degree[left] == 1
+                    and full_graph.in_degree[right] == 1
+                    and left.addr not in jump_tables
+                    and right.addr not in jump_tables
+                ):
                     edge_cond_left = self.cond_proc.recover_edge_condition(full_graph, start_node, left)
                     edge_cond_right = self.cond_proc.recover_edge_condition(full_graph, start_node, right)
                     if claripy.is_true(claripy.Not(edge_cond_left) == edge_cond_right):
                         # c = !c
                         new_cond_node = ConditionNode(start_node.addr, None, edge_cond_left, left, false_node=right)
-                        # TODO: Remove the last statement of start_node
+                        self._remove_last_statement_if_jump(start_node)
                         new_node = SequenceNode(start_node.addr, nodes=[start_node, new_cond_node])
 
                         if not left_succs:
@@ -1012,16 +1254,15 @@ class PhoenixStructurer(StructurerBase):
                 left_succs, right_succs = right_succs, left_succs
             if left in graph and not left_succs and full_graph.in_degree[left] == 1 and right in graph:
                 # potentially If-Then
-                jump_tables = self.kb.cfgs['CFGFast'].jump_tables
+                jump_tables = self.kb.cfgs["CFGFast"].jump_tables
 
-                if left.addr not in jump_tables \
-                        and right.addr not in jump_tables:
+                if left.addr not in jump_tables and right.addr not in jump_tables:
                     edge_cond_left = self.cond_proc.recover_edge_condition(full_graph, start_node, left)
                     edge_cond_right = self.cond_proc.recover_edge_condition(full_graph, start_node, right)
                     if claripy.is_true(claripy.Not(edge_cond_left) == edge_cond_right):
                         # c = !c
                         new_cond_node = ConditionNode(start_node.addr, None, edge_cond_left, left, false_node=None)
-                        # TODO: Remove the last statement of start_node
+                        self._remove_last_statement_if_jump(start_node)
                         new_node = SequenceNode(start_node.addr, nodes=[start_node, new_cond_node])
 
                         # on the original graph
@@ -1037,13 +1278,13 @@ class PhoenixStructurer(StructurerBase):
                 left_succs, right_succs = right_succs, left_succs
             if left in graph and len(left_succs) == 1 and left_succs[0] == right:
                 # potentially If-Then
-                if full_graph.in_degree[left] == 1 and full_graph.in_degree[right] == 2:
+                if full_graph.in_degree[left] == 1 and full_graph.in_degree[right] >= 2:
                     edge_cond_left = self.cond_proc.recover_edge_condition(full_graph, start_node, left)
                     edge_cond_right = self.cond_proc.recover_edge_condition(full_graph, start_node, right)
                     if claripy.is_true(claripy.Not(edge_cond_left) == edge_cond_right):
                         # c = !c
                         new_cond_node = ConditionNode(start_node.addr, None, edge_cond_left, left, false_node=None)
-                        # TODO: Remove the last statement of start_node
+                        self._remove_last_statement_if_jump(start_node)
                         new_node = SequenceNode(start_node.addr, nodes=[start_node, new_cond_node])
 
                         # on the original graph
@@ -1054,17 +1295,40 @@ class PhoenixStructurer(StructurerBase):
                         return True
 
             if right in graph and not left in graph:
+                # swap them
                 left, right = right, left
+                left_succs, right_succs = right_succs, left_succs  # pylint:disable=unused-variable
             if left in graph and not right in graph:
                 # potentially If-then
-                if full_graph.in_degree[left] == 1 and full_graph.in_degree[right] == 2:
+                if full_graph.in_degree[left] == 1 and (
+                    full_graph.in_degree[right] == 2
+                    and left_succs == [right]
+                    or full_graph.in_degree[right] == 1
+                    and not left_succs
+                ):
                     edge_cond_left = self.cond_proc.recover_edge_condition(full_graph, start_node, left)
                     edge_cond_right = self.cond_proc.recover_edge_condition(full_graph, start_node, right)
                     if claripy.is_true(claripy.Not(edge_cond_left) == edge_cond_right):
                         # c = !c
                         new_cond_node = ConditionNode(start_node.addr, None, edge_cond_left, left, false_node=None)
-                        # TODO: Remove the last statement of start_node
-                        new_node = SequenceNode(start_node.addr, nodes=[start_node, new_cond_node])
+                        new_nodes = [start_node, new_cond_node]
+                        if full_graph.in_degree[right] == 1:
+                            # only remove the if statement when it will no longer be used later
+                            self._remove_last_statement_if_jump(start_node)
+                            # add a goto node at the end
+                            new_jump_node = Block(
+                                new_cond_node.addr,
+                                0,
+                                statements=[
+                                    Jump(
+                                        None,
+                                        Const(None, None, right.addr, self.project.arch.bits),
+                                        ins_addr=new_cond_node.addr,
+                                    )
+                                ],
+                            )
+                            new_nodes.append(new_jump_node)
+                        new_node = SequenceNode(start_node.addr, nodes=new_nodes)
 
                         # on the original graph
                         self.replace_nodes(graph, start_node, new_node, old_node_1=left)
@@ -1075,8 +1339,9 @@ class PhoenixStructurer(StructurerBase):
 
         return False
 
-    def _match_acyclic_short_circuit_conditions(self, graph: networkx.DiGraph, full_graph: networkx.DiGraph,
-                                                start_node) -> bool:
+    def _match_acyclic_short_circuit_conditions(
+        self, graph: networkx.DiGraph, full_graph: networkx.DiGraph, start_node
+    ) -> bool:
         """
         Check if start_node is the beginning of an If-Then-Else region with cascading short-circuit expressions as the
         condition. Create a Condition node if it is the case.
@@ -1173,7 +1438,7 @@ class PhoenixStructurer(StructurerBase):
             self._remove_last_statement_if_jump(start_node)
             new_node = SequenceNode(start_node.addr, nodes=[start_node, new_cond_node])
 
-            self.replace_nodes(graph, start_node, new_node, old_node_1=left)
+            self.replace_nodes(graph, start_node, new_node, old_node_1=left if left in graph else None)
             self.replace_nodes(full_graph, start_node, new_node, old_node_1=left)
 
             return True
@@ -1195,7 +1460,7 @@ class PhoenixStructurer(StructurerBase):
             self._remove_last_statement_if_jump(start_node)
             new_node = SequenceNode(start_node.addr, nodes=[start_node, new_cond_node])
 
-            self.replace_nodes(graph, start_node, new_node, old_node_1=right)
+            self.replace_nodes(graph, start_node, new_node, old_node_1=right if right in graph else None)
             self.replace_nodes(full_graph, start_node, new_node, old_node_1=right)
 
             return True
@@ -1217,7 +1482,7 @@ class PhoenixStructurer(StructurerBase):
             self._remove_last_statement_if_jump(start_node)
             new_node = SequenceNode(start_node.addr, nodes=[start_node, new_cond_node])
 
-            self.replace_nodes(graph, start_node, new_node, old_node_1=left)
+            self.replace_nodes(graph, start_node, new_node, old_node_1=left if left in graph else None)
             self.replace_nodes(full_graph, start_node, new_node, old_node_1=left)
             return True
 
@@ -1238,13 +1503,15 @@ class PhoenixStructurer(StructurerBase):
             self._remove_last_statement_if_jump(start_node)
             new_node = SequenceNode(start_node.addr, nodes=[start_node, new_cond_node])
 
-            self.replace_nodes(graph, start_node, new_node, old_node_1=left)
+            self.replace_nodes(graph, start_node, new_node, old_node_1=left if left in graph else None)
             self.replace_nodes(full_graph, start_node, new_node, old_node_1=left)
             return True
 
         return False
 
-    def _match_acyclic_short_circuit_conditions_type_a(self, graph, full_graph, start_node) -> Optional[Tuple]:  # pylint:disable=unused-argument
+    def _match_acyclic_short_circuit_conditions_type_a(  # pylint:disable=unused-argument
+        self, graph, full_graph, start_node
+    ) -> Optional[Tuple]:
 
         #   if (a) goto right
         #   else if (b) goto right
@@ -1260,9 +1527,11 @@ class PhoenixStructurer(StructurerBase):
 
             if full_graph.in_degree[left] > 1 and full_graph.in_degree[right] == 1:
                 left, right = right, left
-            if self._is_single_statement_block(left) \
-                    and full_graph.in_degree[left] == 1 \
-                    and full_graph.in_degree[right] >= 1:
+            if (
+                self._is_single_statement_block(left)
+                and full_graph.in_degree[left] == 1
+                and full_graph.in_degree[right] >= 1
+            ):
                 edge_cond_left = self.cond_proc.recover_edge_condition(full_graph, start_node, left)
                 edge_cond_right = self.cond_proc.recover_edge_condition(full_graph, start_node, right)
                 if claripy.is_true(claripy.Not(edge_cond_left) == edge_cond_right):
@@ -1279,7 +1548,9 @@ class PhoenixStructurer(StructurerBase):
                                 return left, edge_cond_left, right, edge_cond_left_right, other_succ
         return None
 
-    def _match_acyclic_short_circuit_conditions_type_b(self, graph, full_graph, start_node) -> Optional[Tuple]:  # pylint:disable=unused-argument
+    def _match_acyclic_short_circuit_conditions_type_b(  # pylint:disable=unused-argument
+        self, graph, full_graph, start_node
+    ) -> Optional[Tuple]:
 
         #   if (a) goto left
         # right:
@@ -1299,9 +1570,11 @@ class PhoenixStructurer(StructurerBase):
 
             if full_graph.in_degree[left] == 1 and full_graph.in_degree[right] == 2:
                 left, right = right, left
-            if self._is_single_statement_block(right) \
-                    and full_graph.in_degree[left] == 2 \
-                    and full_graph.in_degree[right] == 1:
+            if (
+                self._is_single_statement_block(right)
+                and full_graph.in_degree[left] == 2
+                and full_graph.in_degree[right] == 1
+            ):
                 edge_cond_left = self.cond_proc.recover_edge_condition(full_graph, start_node, left)
                 edge_cond_right = self.cond_proc.recover_edge_condition(full_graph, start_node, right)
                 if claripy.is_true(claripy.Not(edge_cond_left) == edge_cond_right):
@@ -1310,7 +1583,7 @@ class PhoenixStructurer(StructurerBase):
                     left_succs = list(full_graph.successors(left))
                     if len(right_succs) == 2 and left in right_succs:
                         else_node = next(iter(succ for succ in right_succs if succ is not left))
-                        if len([ succ for succ in left_succs if succ is not else_node ]) == 1:
+                        if len([succ for succ in left_succs if succ is not else_node]) == 1:
                             edge_cond_right_left = self.cond_proc.recover_edge_condition(full_graph, right, left)
                             edge_cond_right_else = self.cond_proc.recover_edge_condition(full_graph, right, else_node)
                             if claripy.is_true(claripy.Not(edge_cond_right_left) == edge_cond_right_else):
@@ -1318,7 +1591,9 @@ class PhoenixStructurer(StructurerBase):
                                 return left, edge_cond_left, right, edge_cond_right_left, else_node
         return None
 
-    def _match_acyclic_short_circuit_conditions_type_c(self, graph, full_graph, start_node) -> Optional[Tuple]:  # pylint:disable=unused-argument
+    def _match_acyclic_short_circuit_conditions_type_c(  # pylint:disable=unused-argument
+        self, graph, full_graph, start_node
+    ) -> Optional[Tuple]:
 
         #   if (a) goto successor
         #   else if (b) goto successor
@@ -1332,9 +1607,11 @@ class PhoenixStructurer(StructurerBase):
 
             if full_graph.in_degree[left] > 1 and full_graph.in_degree[successor] == 1:
                 left, successor = successor, left
-            if self._is_single_statement_block(left) \
-                    and full_graph.in_degree[left] == 1 \
-                    and full_graph.in_degree[successor] >= 1:
+            if (
+                self._is_single_statement_block(left)
+                and full_graph.in_degree[left] == 1
+                and full_graph.in_degree[successor] >= 1
+            ):
                 edge_cond_left = self.cond_proc.recover_edge_condition(full_graph, start_node, left)
                 edge_cond_successor = self.cond_proc.recover_edge_condition(full_graph, start_node, successor)
                 if claripy.is_true(claripy.Not(edge_cond_left) == edge_cond_successor):
@@ -1345,14 +1622,17 @@ class PhoenixStructurer(StructurerBase):
                         if full_graph.out_degree[right] == 1 and full_graph.has_edge(right, successor):
                             # there must be an edge from right to successor
                             edge_cond_left_right = self.cond_proc.recover_edge_condition(full_graph, left, right)
-                            edge_cond_left_successor = \
-                                self.cond_proc.recover_edge_condition(full_graph, left, successor)
+                            edge_cond_left_successor = self.cond_proc.recover_edge_condition(
+                                full_graph, left, successor
+                            )
                             if claripy.is_true(claripy.Not(edge_cond_left_right) == edge_cond_left_successor):
                                 # c1 = !c1
                                 return left, edge_cond_left, successor, edge_cond_left_successor, right
         return None
 
-    def _match_acyclic_short_circuit_conditions_type_d(self, graph, full_graph, start_node) -> Optional[Tuple]:  # pylint:disable=unused-argument
+    def _match_acyclic_short_circuit_conditions_type_d(  # pylint:disable=unused-argument
+        self, graph, full_graph, start_node
+    ) -> Optional[Tuple]:
 
         #   if (a) goto else_node
         # left:
@@ -1371,9 +1651,11 @@ class PhoenixStructurer(StructurerBase):
 
             if full_graph.in_degree[left] > 1 and full_graph.in_degree[else_node] == 1:
                 left, else_node = else_node, left
-            if self._is_single_statement_block(left) \
-                    and full_graph.in_degree[left] == 1 \
-                    and full_graph.in_degree[else_node] >= 1:
+            if (
+                self._is_single_statement_block(left)
+                and full_graph.in_degree[left] == 1
+                and full_graph.in_degree[else_node] >= 1
+            ):
                 edge_cond_left = self.cond_proc.recover_edge_condition(full_graph, start_node, left)
                 edge_cond_else = self.cond_proc.recover_edge_condition(full_graph, start_node, else_node)
                 if claripy.is_true(claripy.Not(edge_cond_left) == edge_cond_else):
@@ -1399,10 +1681,10 @@ class PhoenixStructurer(StructurerBase):
                     return True
 
         # virtualize an edge to allow progressing in structuring
-        all_edges_wo_dominance = [ ]  # to ensure determinism, edges in this list are ordered by a tuple of
-                                      # (src_addr, dst_addr)
-        secondary_edges = [ ]  # likewise, edges in this list are ordered by a tuple of (src_addr, dst_addr)
-        other_edges = [ ]
+        all_edges_wo_dominance = []  # to ensure determinism, edges in this list are ordered by a tuple of
+        # (src_addr, dst_addr)
+        secondary_edges = []  # likewise, edges in this list are ordered by a tuple of (src_addr, dst_addr)
+        other_edges = []
         idoms = networkx.immediate_dominators(full_graph, head)
         if networkx.is_directed_acyclic_graph(full_graph):
             _, inv_idoms = inverted_idoms(full_graph)
@@ -1427,7 +1709,7 @@ class PhoenixStructurer(StructurerBase):
                     other_edges.append((src, dst))
 
         if all_edges_wo_dominance:
-            all_edges_wo_dominance = list(sorted(all_edges_wo_dominance, key=lambda x: (x[0].addr, x[1].addr)))
+            all_edges_wo_dominance = self._chick_order_edges(all_edges_wo_dominance)
             # virtualize the first edge
             src, dst = all_edges_wo_dominance[0]
             self._virtualize_edge(graph, full_graph, src, dst)
@@ -1435,7 +1717,7 @@ class PhoenixStructurer(StructurerBase):
             return True
 
         if secondary_edges:
-            secondary_edges = list(sorted(secondary_edges, key=lambda x: (x[0].addr, x[1].addr)))
+            secondary_edges = self._chick_order_edges(secondary_edges)
             # virtualize the first edge
             src, dst = secondary_edges[0]
             self._virtualize_edge(graph, full_graph, src, dst)
@@ -1460,7 +1742,7 @@ class PhoenixStructurer(StructurerBase):
                 goto0_target = last_stmt.true_target
                 goto1_target = last_stmt.false_target
             elif isinstance(last_stmt.false_target, Const) and last_stmt.false_target.value == dst.addr:
-                goto0_condition = UnaryOp(None, 'Not', last_stmt.condition)
+                goto0_condition = UnaryOp(None, "Not", last_stmt.condition)
                 goto0_target = last_stmt.false_target
                 goto1_target = last_stmt.true_target
             else:
@@ -1470,13 +1752,17 @@ class PhoenixStructurer(StructurerBase):
                 goto1_target = None
 
             if goto0_condition is not None:
-                goto0 = Block(last_stmt.ins_addr, 0, statements=[Jump(None, goto0_target,
-                                                                      ins_addr=last_stmt.ins_addr,
-                                                                      stmt_idx=0)])
+                goto0 = Block(
+                    last_stmt.ins_addr,
+                    0,
+                    statements=[Jump(None, goto0_target, ins_addr=last_stmt.ins_addr, stmt_idx=0)],
+                )
                 cond_node = ConditionNode(last_stmt.ins_addr, None, goto0_condition, goto0)
-                goto1_node = Block(last_stmt.ins_addr, 0, statements=[Jump(None, goto1_target,
-                                                                           ins_addr=last_stmt.ins_addr,
-                                                                           stmt_idx=0)])
+                goto1_node = Block(
+                    last_stmt.ins_addr,
+                    0,
+                    statements=[Jump(None, goto1_target, ins_addr=last_stmt.ins_addr, stmt_idx=0)],
+                )
                 remove_src_last_stmt = True
                 new_src = SequenceNode(src.addr, nodes=[src, cond_node, goto1_node])
         elif isinstance(last_stmt, Jump):
@@ -1485,9 +1771,13 @@ class PhoenixStructurer(StructurerBase):
         else:
             # insert a Jump at the end
             stmt_addr = last_stmt.ins_addr if last_stmt is not None else src.addr
-            goto_node = Block(stmt_addr, 0, statements=[
-                Jump(None, Const(None, None, dst.addr, self.project.arch.bits), ins_addr=stmt_addr, stmt_idx=0)
-            ])
+            goto_node = Block(
+                stmt_addr,
+                0,
+                statements=[
+                    Jump(None, Const(None, None, dst.addr, self.project.arch.bits), ins_addr=stmt_addr, stmt_idx=0)
+                ],
+            )
             new_src = SequenceNode(src.addr, nodes=[src, goto_node])
 
         graph.remove_edge(src, dst)
@@ -1501,8 +1791,12 @@ class PhoenixStructurer(StructurerBase):
             remove_last_statement(src)
 
     @staticmethod
-    def _find_node_going_to_dst(node: SequenceNode,
-                                dst: Union[Block,BaseNode]) -> Tuple[Optional[BaseNode],Optional[Block]]:
+    def _find_node_going_to_dst(
+        node: SequenceNode,
+        dst: Union[Block, BaseNode],
+        last=True,
+        condjump_only=False,
+    ) -> Tuple[Optional[BaseNode], Optional[Block]]:
         """
 
         :param node:
@@ -1515,42 +1809,48 @@ class PhoenixStructurer(StructurerBase):
         dst_idx = dst.idx if isinstance(dst, Block) else ...
 
         def _check(last_stmt):
-            if isinstance(last_stmt, Jump) \
-                    and isinstance(last_stmt.target, Const) \
-                    and last_stmt.target.value == dst_addr \
-                    and (dst_idx is ... or last_stmt.target_idx == dst_idx):
+            if (
+                not condjump_only
+                and isinstance(last_stmt, Jump)
+                and isinstance(last_stmt.target, Const)
+                and last_stmt.target.value == dst_addr
+                and (dst_idx is ... or last_stmt.target_idx == dst_idx)
+            ):
                 return True
             elif isinstance(last_stmt, ConditionalJump):
                 if isinstance(last_stmt.true_target, Const) and last_stmt.true_target.value == dst_addr:
                     return True
                 elif isinstance(last_stmt.false_target, Const) and last_stmt.false_target.value == dst_addr:
                     return True
+            elif isinstance(last_stmt, IncompleteSwitchCaseHeadStatement):
+                if any(case_addr == dst_addr for _, case_addr in last_stmt.case_addrs):
+                    return True
             return False
 
         def _handle_Block(block: Block, parent=None, **kwargs):  # pylint:disable=unused-argument
             if block.statements:
-                first_stmt = block.statements[0]
+                first_stmt = first_nonlabel_statement(block)
                 if _check(first_stmt):
-                    walker.parent = parent
-                    walker.block = block
+                    walker.parent_and_block.append((parent, block))
                 elif len(block.statements) > 1:
                     last_stmt = block.statements[-1]
                     if _check(last_stmt):
-                        walker.parent = parent
-                        walker.block = block
+                        walker.parent_and_block.append((parent, block))
 
         def _handle_MultiNode(block: MultiNode, parent=None, **kwargs):  # pylint:disable=unused-argument
             if block.nodes and isinstance(block.nodes[-1], Block) and block.nodes[-1].statements:
                 if _check(block.nodes[-1].statements[-1]):
-                    walker.parent = parent
-                    walker.block = block
+                    walker.parent_and_block.append((parent, block))
                     return
 
         def _handle_BreakNode(break_node: BreakNode, parent=None, **kwargs):  # pylint:disable=unused-argument
-            if isinstance(break_node.target, Const) and break_node.target.value == dst_addr:
+            if (
+                break_node.target == dst_addr
+                or isinstance(break_node.target, Const)
+                and break_node.target.value == dst_addr
+            ):
                 # FIXME: idx is ignored
-                walker.parent = parent
-                walker.block = break_node
+                walker.parent_and_block.append((parent, break_node))
                 return
 
         walker = SequenceWalker(
@@ -1559,12 +1859,16 @@ class PhoenixStructurer(StructurerBase):
                 MultiNode: _handle_MultiNode,
                 BreakNode: _handle_BreakNode,
             },
-            update_seqnode_in_place=False
+            update_seqnode_in_place=False,
         )
-        walker.parent = None
-        walker.block = None
+        walker.parent_and_block = []
         walker.walk(node)
-        return walker.parent, walker.block
+        if not walker.parent_and_block:
+            return None, None
+        else:
+            if last:
+                return walker.parent_and_block[-1]
+            return walker.parent_and_block[0]
 
     @staticmethod
     def _unpack_sequencenode_head(graph: networkx.DiGraph, seq: SequenceNode, new_seq=None):
@@ -1606,17 +1910,17 @@ class PhoenixStructurer(StructurerBase):
                     graph.add_edge(case_node, succs[0])
 
     @staticmethod
-    def _count_statements(node: Union[BaseNode,Block]) -> int:
+    def _count_statements(node: Union[BaseNode, Block]) -> int:
         if isinstance(node, Block):
-            return len(node.statements)
+            return sum(1 for stmt in node.statements if not isinstance(stmt, Label))
         elif isinstance(node, MultiNode):
-            return sum(len(nn.statements) for nn in node.nodes)
+            return sum(PhoenixStructurer._count_statements(nn) for nn in node.nodes)
         elif isinstance(node, SequenceNode):
             return sum(PhoenixStructurer._count_statements(nn) for nn in node.nodes)
         return 1
 
     @staticmethod
-    def _is_single_statement_block(node: Union[BaseNode,Block]) -> bool:
+    def _is_single_statement_block(node: Union[BaseNode, Block]) -> bool:
         if isinstance(node, (Block, MultiNode, SequenceNode)):
             return PhoenixStructurer._count_statements(node) == 1
         return False
@@ -1628,11 +1932,70 @@ class PhoenixStructurer(StructurerBase):
                 graph.remove_edge(src, succ)
 
     @staticmethod
-    def _remove_last_statement_if_jump(node: BaseNode):
+    def _remove_first_statement_if_jump(node: Union[BaseNode, Block]) -> Optional[Union[Jump, ConditionalJump]]:
+        if isinstance(node, Block):
+            if node.statements:
+                idx = 0
+                first_stmt = node.statements[idx]
+                while isinstance(first_stmt, Label):
+                    idx += 1
+                    if idx >= len(node.statements):
+                        first_stmt = None
+                        break
+                    first_stmt = node.statements[idx]
+
+                if isinstance(first_stmt, (Jump, ConditionalJump)):
+                    if idx == 0:
+                        node.statements = node.statements[1:]
+                    else:
+                        node.statements = node.statements[0:idx] + node.statements[idx + 1 :]
+                    return first_stmt
+            return None
+        if isinstance(node, MultiNode):
+            for nn in node.nodes:
+                if isinstance(nn, Block):
+                    if not has_nonlabel_statements(nn):
+                        continue
+                    return PhoenixStructurer._remove_first_statement_if_jump(nn)
+                break
+        return None
+
+    @staticmethod
+    def _remove_last_statement_if_jump(node: Union[BaseNode, Block]) -> Optional[Union[Jump, ConditionalJump]]:
         try:
             last_stmts = ConditionProcessor.get_last_statements(node)
         except EmptyBlockNotice:
-            return
+            return None
 
         if len(last_stmts) == 1 and isinstance(last_stmts[0], (Jump, ConditionalJump)):
-            remove_last_statement(node)
+            return remove_last_statement(node)
+        return None
+
+    @staticmethod
+    def _chick_order_edges(edges: List) -> List:
+
+        graph = networkx.DiGraph()
+        graph.add_edges_from(edges)
+
+        def _sort_edge(edge_):
+            src, dst = edge_
+            dst_in_degree = graph.in_degree[dst]
+            src_out_degree = graph.out_degree[src]
+            return dst_in_degree, src_out_degree, -src.addr, -dst.addr
+
+        return list(sorted(edges, key=_sort_edge, reverse=True))
+
+    @staticmethod
+    def _replace_node_in_edge_list(edge_list: List[Tuple], old_node, new_node) -> None:
+        for idx in range(len(edge_list)):  # pylint:disable=consider-using-enumerate
+            edge = edge_list[idx]
+            src, dst = edge
+            replace = False
+            if src is old_node:
+                src = new_node
+                replace = True
+            if dst is old_node:
+                dst = new_node
+                replace = True
+            if replace:
+                edge_list[idx] = src, dst

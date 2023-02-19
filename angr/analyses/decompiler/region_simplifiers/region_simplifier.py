@@ -3,6 +3,8 @@ import ailment
 from ....analyses import AnalysesHub
 from ...analysis import Analysis
 from ..empty_node_remover import EmptyNodeRemover
+from ..jump_target_collector import JumpTargetCollector
+from ..redundant_label_remover import RedundantLabelRemover
 from .goto import GotoSimplifier
 from .if_ import IfSimplifier
 from .cascading_ifs import CascadingIfsRemover
@@ -16,6 +18,7 @@ class RegionSimplifier(Analysis):
     """
     Simplifies a given region.
     """
+
     def __init__(self, func, region, variable_kb=None):
         self.func = func
         self.region = region
@@ -33,17 +36,22 @@ class RegionSimplifier(Analysis):
         """
 
         r = self.region
-        if self.variable_kb is not None:
-            # Fold expressions that are only used once into their use sites
-            r = self._fold_oneuse_expressions(r)
         # Remove empty nodes
         r = self._remove_empty_nodes(r)
-        # Find nested if-else constructs and convert them into CascadingIfs
-        r = self._transform_to_cascading_ifs(r)
         # Remove unnecessary Jump statements
         r = self._simplify_gotos(r)
         # Remove unnecessary jump or conditional jump statements if they jump to the successor right afterwards
         r = self._simplify_ifs(r)
+        # Remove labels that are not referenced by anything
+        r = self._simplify_labels(r)
+        # Remove empty nodes again
+        r = self._remove_empty_nodes(r)
+
+        if self.variable_kb is not None:
+            # Fold expressions that are only used once into their use sites
+            r = self._fold_oneuse_expressions(r)
+            r = self._remove_empty_nodes(r)
+
         # Remove unnecessary else branches if the if branch will always return
         r = self._simplify_ifelses(r)
         #
@@ -52,6 +60,8 @@ class RegionSimplifier(Analysis):
         r = self._simplify_loops(r)
         # Remove empty nodes again
         r = self._remove_empty_nodes(r)
+        # Find nested if-else constructs and convert them into CascadingIfs
+        r = self._transform_to_cascading_ifs(r)
 
         self.result = r
 
@@ -70,12 +80,10 @@ class RegionSimplifier(Analysis):
         # pre-process and identify folding candidates
         # for variable definitions with loads, we invoke StoreStatementFinder to see if there are any Store statements
         # before the definition site and the use site.
-        var_with_loads = { }
-        single_use_variables = [ ]
+        var_with_loads = {}
+        single_use_variables = []
         for var, uses in expr_counter.uses.items():
-            if len(uses) == 1 \
-                    and var in expr_counter.assignments \
-                    and len(expr_counter.assignments[var]) == 1:
+            if len(uses) == 1 and var in expr_counter.assignments and len(expr_counter.assignments[var]) == 1:
                 definition, deps, loc, has_loads = next(iter(expr_counter.assignments[var]))
                 if has_loads:
                     # the definition has at least one load expression. we need to ensure there are no store statements
@@ -147,6 +155,12 @@ class RegionSimplifier(Analysis):
         IfSimplifier(region)
         return region
 
+    @staticmethod
+    def _simplify_labels(region):
+        jcl = JumpTargetCollector(region)
+        RedundantLabelRemover(region, jcl.jump_targets)
+        return region
+
     def _simplify_ifelses(self, region):
         IfElseFlattener(region, self.kb.functions)
         return region
@@ -162,4 +176,4 @@ class RegionSimplifier(Analysis):
         return region
 
 
-AnalysesHub.register_default('RegionSimplifier', RegionSimplifier)
+AnalysesHub.register_default("RegionSimplifier", RegionSimplifier)

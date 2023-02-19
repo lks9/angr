@@ -13,6 +13,7 @@ from ..analyses.cfg import CFGUtils
 from . import Analysis, register_analysis, VariableRecoveryFast, CallingConventionAnalysis
 
 if TYPE_CHECKING:
+    import networkx
     from angr.calling_conventions import SimCC
     from angr.sim_type import SimTypeFunction
     from angr.knowledge_plugins.variables.variable_manager import VariableManagerInternal
@@ -30,21 +31,22 @@ class CompleteCallingConventionsAnalysis(Analysis):
     """
 
     def __init__(
-            self,
-            recover_variables=False,
-            low_priority=False,
-            force=False,
-            cfg: Optional[CFGModel]=None,
-            analyze_callsites: bool=False,
-            skip_signature_matched_functions: bool=False,
-            max_function_blocks: Optional[int]=None,
-            max_function_size: Optional[int]=None,
-            workers: int=0,
-            cc_callback: Optional[Callable]=None,
-            prioritize_func_addrs: Optional[Iterable[int]]=None,
-            skip_other_funcs: bool=False,
-            auto_start: bool=True
-        ):
+        self,
+        recover_variables=False,
+        low_priority=False,
+        force=False,
+        cfg: Optional[CFGModel] = None,
+        analyze_callsites: bool = False,
+        skip_signature_matched_functions: bool = False,
+        max_function_blocks: Optional[int] = None,
+        max_function_size: Optional[int] = None,
+        workers: int = 0,
+        cc_callback: Optional[Callable] = None,
+        prioritize_func_addrs: Optional[Iterable[int]] = None,
+        skip_other_funcs: bool = False,
+        auto_start: bool = True,
+        func_graphs: Optional[Dict[int, "networkx.DiGraph"]] = None,
+    ):
         """
 
         :param recover_variables:   Recover variables on each function before performing calling convention analysis.
@@ -76,11 +78,12 @@ class CompleteCallingConventionsAnalysis(Analysis):
         self._skip_other_funcs = skip_other_funcs
         self._auto_start = auto_start
         self._total_funcs = None
+        self._func_graphs = {} if not func_graphs else func_graphs
 
-        self._func_addrs = [ ]  # a list that holds addresses of all functions to be analyzed
-        self._results = [ ]
+        self._func_addrs = []  # a list that holds addresses of all functions to be analyzed
+        self._results = []
         if workers > 0:
-            self._remaining_funcs = _mp_context.Value('i', 0)
+            self._remaining_funcs = _mp_context.Value("i", 0)
             self._func_queue = _mp_context.Queue()
             self._results = _mp_context.Queue()
             self._func_queue_lock = _mp_context.Lock()
@@ -116,14 +119,24 @@ class CompleteCallingConventionsAnalysis(Analysis):
                 if self._max_function_size is not None:
                     func_size = sum(block.size for block in func.blocks)
                     if func_size > self._max_function_size:
-                        _l.info("Skipping variable recovery for %r since its size (%d) is greater than the cutoff "
-                                "size (%d).", func, func_size, self._max_function_size)
+                        _l.info(
+                            "Skipping variable recovery for %r since its size (%d) is greater than the cutoff "
+                            "size (%d).",
+                            func,
+                            func_size,
+                            self._max_function_size,
+                        )
                         continue
 
                 if self._max_function_blocks is not None:
                     if len(func.block_addrs_set) > self._max_function_blocks:
-                        _l.info("Skipping variable recovery for %r since its number of blocks (%d) is greater than the "
-                                "cutoff number (%d).", func, len(func.block_addrs_set), self._max_function_blocks)
+                        _l.info(
+                            "Skipping variable recovery for %r since its number of blocks (%d) is greater than the "
+                            "cutoff number (%d).",
+                            func,
+                            len(func.block_addrs_set),
+                            self._max_function_blocks,
+                        )
                         continue
 
                 # if it's a normal function, we attempt to perform variable recovery
@@ -177,10 +190,11 @@ class CompleteCallingConventionsAnalysis(Analysis):
                         dependents[callee].add(func_addr)
 
             # enqueue all leaf functions
-            for func_addr in list(k for k in depends_on if not depends_on[k]):  # pylint:disable=consider-using-dict-items
+            for func_addr in list(
+                k for k in depends_on if not depends_on[k]
+            ):  # pylint:disable=consider-using-dict-items
                 self._func_queue.put((func_addr, None))
                 del depends_on[func_addr]
-                self._remaining_funcs.value -= 1
 
             self._update_progress(0, text="Spawning workers...")
             cc_callback = self._cc_callback
@@ -189,11 +203,7 @@ class CompleteCallingConventionsAnalysis(Analysis):
             # spawn workers to perform the analysis
             with self._func_queue_lock:
                 procs = [
-                    _mp_context.Process(
-                        target=self._worker_routine,
-                        args=(Initializer.get(),),
-                        daemon=True
-                    )
+                    _mp_context.Process(target=self._worker_routine, args=(Initializer.get(),), daemon=True)
                     for _ in range(self._workers)
                 ]
                 for proc_idx, proc in enumerate(procs):
@@ -235,7 +245,6 @@ class CompleteCallingConventionsAnalysis(Analysis):
                             callee_prototypes = self._get_callees_cc_prototypes(dependent)
                             self._func_queue.put((dependent, callee_prototypes))
                             del depends_on[dependent]
-                            self._remaining_funcs.value -= 1
 
             for proc in procs:
                 proc.join()
@@ -247,12 +256,13 @@ class CompleteCallingConventionsAnalysis(Analysis):
             try:
                 with self._func_queue_lock:
                     func_addr, callee_info = self._func_queue.get(True, timeout=0.01)
+                    self._remaining_funcs.value -= 1
             except queue.Empty:
                 time.sleep(0.3)
                 continue
 
             if callee_info is not None:
-                callee_info: Dict[int,Tuple[Optional['SimCC'],Optional['SimTypeFunction']]]
+                callee_info: Dict[int, Tuple[Optional["SimCC"], Optional["SimTypeFunction"]]]
                 for callee, (callee_cc, callee_proto) in callee_info.items():
                     callee_func = self.kb.functions.get_by_addr(callee)
                     callee_func.calling_convention = callee_cc
@@ -270,8 +280,9 @@ class CompleteCallingConventionsAnalysis(Analysis):
                 cc, proto, varman = None, None, None
             self._results.put((func_addr, cc, proto, varman))
 
-    def _analyze_core(self, func_addr: int) -> Tuple[Optional['SimCC'],Optional['SimTypeFunction'],
-                                                     Optional['VariableManagerInternal']]:
+    def _analyze_core(
+        self, func_addr: int
+    ) -> Tuple[Optional["SimCC"], Optional["SimTypeFunction"], Optional["VariableManagerInternal"]]:
         func = self.kb.functions.get_by_addr(func_addr)
         if func.ran_cca:
             return func.calling_convention, func.prototype, self.kb.variables.get_function_manager(func_addr)
@@ -279,18 +290,21 @@ class CompleteCallingConventionsAnalysis(Analysis):
         if self._recover_variables and self.function_needs_variable_recovery(func):
             _l.info("Performing variable recovery on %r...", func)
             try:
-                _ = self.project.analyses[VariableRecoveryFast].prep(kb=self.kb)(func, low_priority=self._low_priority)
+                _ = self.project.analyses[VariableRecoveryFast].prep(kb=self.kb)(
+                    func, low_priority=self._low_priority, func_graph=self._func_graphs.get(func.addr, None)
+                )
             except claripy.ClaripyError:
-                _l.warning("An claripy exception occurred during variable recovery analysis on function %#x.",
-                           func.addr,
-                           exc_info=True,
-                           )
+                _l.warning(
+                    "An claripy exception occurred during variable recovery analysis on function %#x.",
+                    func.addr,
+                    exc_info=True,
+                )
                 return None, None, None
 
         # determine the calling convention of each function
         cc_analysis = self.project.analyses[CallingConventionAnalysis].prep(kb=self.kb)(
-            func, cfg=self._cfg,
-            analyze_callsites=self._analyze_callsites)
+            func, cfg=self._cfg, analyze_callsites=self._analyze_callsites
+        )
 
         if cc_analysis.cc is not None:
             _l.info("Determined calling convention and prototype for %r.", func)
@@ -308,8 +322,8 @@ class CompleteCallingConventionsAnalysis(Analysis):
 
         with self._func_queue_lock:
             func_addrs_to_prioritize = set(func_addrs_to_prioritize)
-            to_prioritize = [ ]
-            remaining = [ ]
+            to_prioritize = []
+            remaining = []
             for addr in self._func_addrs:
                 if addr in func_addrs_to_prioritize:
                     to_prioritize.append(addr)
@@ -320,10 +334,9 @@ class CompleteCallingConventionsAnalysis(Analysis):
             self._func_addrs = to_prioritize + remaining
 
     def _get_callees_cc_prototypes(
-            self,
-            caller_func_addr: int
-    ) -> Dict[int,Tuple[Optional['SimCC'],Optional['SimTypeFunction']]]:
-        d = { }
+        self, caller_func_addr: int
+    ) -> Dict[int, Tuple[Optional["SimCC"], Optional["SimTypeFunction"]]]:
+        d = {}
         for callee in self.kb.functions.callgraph.successors(caller_func_addr):
             if callee != caller_func_addr and callee not in d:
                 func = self.kb.functions.get_by_addr(callee)
