@@ -9,7 +9,6 @@ l = logging.getLogger("angr.engines.soot.field_dispatcher")
 
 
 def resolve_field(state, field_class, field_name, field_type, raise_exception_if_not_found=False):
-
     # In Java, fields are not polymorphic and the class declaring the field is
     # determined statically by the declaring variable. Also fields are uniquely
     # defined by the tuple (field_name, field_type) and in particular *not* by
@@ -41,7 +40,7 @@ def _class_contains_field(field_class, field_name, field_type):
     if not field_class.is_loaded:
         return False
     # check if a field with the given name exists
-    if not field_name in field_class.fields:
+    if field_name not in field_class.fields:
         return False
     field = field_class.fields[field_name]
     # check type

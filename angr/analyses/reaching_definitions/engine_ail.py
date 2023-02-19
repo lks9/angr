@@ -30,7 +30,6 @@ class SimEngineRDAIL(
     SimEngineLightAILMixin,
     SimEngineLight,
 ):  # pylint:disable=abstract-method
-
     arch: archinfo.Arch
     state: ReachingDefinitionsState
 
@@ -112,7 +111,6 @@ class SimEngineRDAIL(
     #
 
     def _handle_Stmt(self, stmt):
-
         if self.state.analysis:
             self.state.analysis.insn_observe(self.ins_addr, stmt, self.block, self.state, OP_BEFORE)
 
@@ -167,13 +165,10 @@ class SimEngineRDAIL(
         addr: MultiValues = self._expr(stmt.addr)
         size: int = stmt.size
         if stmt.guard is not None:
-            guard = self._expr(stmt.guard)  # pylint:disable=unused-variable
-        else:
-            guard = None  # pylint:disable=unused-variable
+            self._expr(stmt.guard)
 
         addr_v = addr.one_value()
         if addr_v is not None and not self.state.is_top(addr_v):
-
             if self.state.is_stack_address(addr_v):
                 stack_offset = self.state.get_stack_offset(addr_v)
                 if stack_offset is not None:
@@ -192,7 +187,6 @@ class SimEngineRDAIL(
         _ = self._expr(stmt.target)
 
     def _ail_handle_ConditionalJump(self, stmt):
-
         _ = self._expr(stmt.condition)  # pylint:disable=unused-variable
         if stmt.true_target is not None:
             _ = self._expr(stmt.true_target)  # pylint:disable=unused-variable
@@ -340,7 +334,6 @@ class SimEngineRDAIL(
             self.state.kill_definitions(Register(*self.arch.registers["cc_ndep"]))
 
     def _ail_handle_Return(self, stmt: ailment.Stmt.Return):  # pylint:disable=unused-argument
-
         codeloc = self._codeloc()
 
         cc = None
@@ -426,7 +419,6 @@ class SimEngineRDAIL(
         return MultiValues(expr)
 
     def _ail_handle_Tmp(self, expr: ailment.Expr.Tmp) -> MultiValues:
-
         self.state.add_tmp_use(expr.tmp_idx, self._codeloc())
 
         tmp = super()._ail_handle_Tmp(expr)
@@ -439,7 +431,6 @@ class SimEngineRDAIL(
         return MultiValues(self.state.top(expr.bits))
 
     def _ail_handle_Register(self, expr: ailment.Expr.Register) -> MultiValues:
-
         self.state: ReachingDefinitionsState
 
         reg_offset = expr.reg_offset
@@ -508,11 +499,8 @@ class SimEngineRDAIL(
         size = expr.size
         bits = expr.bits
         if expr.guard is not None:
-            guard = self._expr(expr.guard)  # pylint:disable=unused-variable
-            alt = self._expr(expr.alt)  # pylint:disable=unused-variable
-        else:
-            guard = None  # pylint:disable=unused-variable
-            alt = None  # pylint:disable=unused-variable
+            self._expr(expr.guard)
+            self._expr(expr.alt)
 
         # convert addrs from MultiValues to a list of valid addresses
         if addrs.count() == 1:
@@ -729,7 +717,6 @@ class SimEngineRDAIL(
         return r
 
     def _ail_handle_Div(self, expr):
-
         arg0, arg1 = expr.operands
 
         self._expr(arg0)
@@ -743,7 +730,6 @@ class SimEngineRDAIL(
         return self._ail_handle_Div(expr)
 
     def _ail_handle_Mul(self, expr):
-
         arg0, arg1 = expr.operands
 
         self._expr(arg0)
@@ -754,7 +740,6 @@ class SimEngineRDAIL(
         return r
 
     def _ail_handle_Mull(self, expr):
-
         arg0, arg1 = expr.operands
 
         self._expr(arg0)
@@ -765,7 +750,6 @@ class SimEngineRDAIL(
         return r
 
     def _ail_handle_Mod(self, expr):
-
         arg0, arg1 = expr.operands
 
         self._expr(arg0)
@@ -1142,7 +1126,6 @@ class SimEngineRDAIL(
     def _ail_handle_DirtyExpression(
         self, expr: ailment.Expr.DirtyExpression
     ) -> MultiValues:  # pylint:disable=no-self-use
-
         if isinstance(expr.dirty_expr, ailment.Expr.VEXCCallExpression):
             for operand in expr.dirty_expr.operands:
                 self._expr(operand)

@@ -1,9 +1,10 @@
 # pylint:disable=line-too-long,multiple-statements
-from typing import Dict, Tuple, List, Optional, Union, Set
+from typing import Dict, Tuple, List, Optional, Union, Set, TYPE_CHECKING
 import logging
 from collections import defaultdict
 
 import networkx
+from sortedcontainers import SortedDict
 
 import pyvex
 from claripy.utils.orderedset import OrderedSet
@@ -21,6 +22,7 @@ from angr.procedures.stubs.UnresolvableJumpTarget import UnresolvableJumpTarget
 from angr.utils.constants import DEFAULT_STATEMENT
 from angr.procedures.procedure_dict import SIM_PROCEDURES
 from angr.errors import (
+    AngrCFGError,
     SimTranslationError,
     SimMemoryError,
     SimIRSBError,
@@ -33,6 +35,10 @@ from angr.engines.vex.lifter import VEX_IRSB_MAX_SIZE, VEX_IRSB_MAX_INST
 from angr.analyses import Analysis
 from angr.analyses.stack_pointer_tracker import StackPointerTracker
 from .indirect_jump_resolvers.default_resolvers import default_indirect_jump_resolvers
+
+if TYPE_CHECKING:
+    from angr.sim_state import SimState
+
 
 l = logging.getLogger(name=__name__)
 
@@ -51,6 +57,10 @@ class CFGBase(Analysis):
         context_sensitivity_level,
         normalize=False,
         binary=None,
+        objects=None,
+        regions=None,
+        exclude_sparse_regions=True,
+        skip_specific_regions=True,
         force_segment=False,
         base_state=None,
         resolve_indirect_jumps=True,
@@ -67,7 +77,11 @@ class CFGBase(Analysis):
         :param int context_sensitivity_level:       The level of context-sensitivity of this CFG (see documentation for
                                                     further details). It ranges from 0 to infinity.
         :param bool normalize:                      Whether the CFG as well as all Function graphs should be normalized.
-        :param cle.backends.Backend binary:         The binary to recover CFG on. By default the main binary is used.
+        :param cle.backends.Backend binary:         The binary to recover CFG on. By default, the main binary is used.
+        :param objects:                             A list of objects to recover the CFG on. By default, it will recover
+                                                    the CFG of all loaded objects.
+        :param iterable regions:                    A list of tuples in the form of (start address, end address)
+                                                    describing memory regions that the CFG should cover.
         :param bool force_segment:                  Force CFGFast to rely on binary segments instead of sections.
         :param angr.SimState base_state:            A state to use as a backer for all memory loads.
         :param bool resolve_indirect_jumps:         Whether to try to resolve indirect jumps.
@@ -150,7 +164,7 @@ class CFGBase(Analysis):
 
         # Get all executable memory regions
         self._exec_mem_regions = self._executable_memory_regions(None, self._force_segment)
-        self._exec_mem_region_size = sum([(end - start) for start, end in self._exec_mem_regions])
+        self._exec_mem_region_size = sum((end - start) for start, end in self._exec_mem_regions)
 
         # initialize UnresolvableJumpTarget and UnresolvableCallTarget SimProcedure
         # but we do not want to hook the same symbol multiple times
@@ -191,6 +205,47 @@ class CFGBase(Analysis):
             self._model = model
         else:
             self._model: CFGModel = self.kb.cfgs.new_model(self.tag)
+
+        # necessary warnings
+        regions_not_specified = regions is None and binary is None and not objects
+        if regions_not_specified and self.project.loader._auto_load_libs and len(self.project.loader.all_objects) > 3:
+            l.warning(
+                '"auto_load_libs" is enabled. With libraries loaded in project, CFG will cover libraries, '
+                "which may take significantly more time than expected. You may reload the binary with "
+                '"auto_load_libs" disabled, or specify "regions" to limit the scope of CFG recovery.'
+            )
+
+        if regions is None:
+            if self._skip_unmapped_addrs:
+                regions = self._executable_memory_regions(objects=objects, force_segment=force_segment)
+            else:
+                if not objects:
+                    objects = self.project.loader.all_objects
+                regions = [(obj.min_addr, obj.max_addr) for obj in objects]
+
+        for start, end in regions:
+            if end < start:
+                raise AngrCFGError("Invalid region bounds (end precedes start)")
+
+        if exclude_sparse_regions:
+            regions = [r for r in regions if not self._is_region_extremely_sparse(*r, base_state=base_state)]
+
+        if skip_specific_regions:
+            if base_state is not None:
+                l.warning("You specified both base_state and skip_specific_regions. They may conflict with each other.")
+            regions = [r for r in regions if not self._should_skip_region(r[0])]
+
+        if not regions and self.project.arch.name != "Soot":
+            raise AngrCFGError(
+                "Regions are empty, or all regions are skipped. You may want to manually specify regions."
+            )
+
+        self._regions_size = sum((end - start) for start, end in regions)
+        self._regions = SortedDict(regions)
+
+        l.debug("CFG recovery covers %d regions:", len(self._regions))
+        for start, end in self._regions.items():
+            l.debug("... %#x - %#x", start, end)
 
     def __contains__(self, cfg_node):
         return cfg_node in self.graph
@@ -246,15 +301,11 @@ class CFGBase(Analysis):
         Re-create the DiGraph
         """
 
-        self.kb.functions = FunctionManager(self.kb)
-
         self._jobs_to_analyze_per_function = defaultdict(set)
         self._completed_functions = set()
 
     def _post_analysis(self):
-
         if self._normalize:
-
             if not self.normalized:
                 self.normalize()
 
@@ -547,15 +598,61 @@ class CFGBase(Analysis):
 
         return successors_filtered
 
-    def _is_region_extremely_sparse(self, start, end, base_state=None):
+    # Methods for determining scanning scope
+
+    def _inside_regions(self, address: int) -> bool:
+        """
+        Check if the address is inside any existing region.
+
+        :param int address: Address to check.
+        :return:            True if the address is within one of the memory regions, False otherwise.
+        """
+
+        try:
+            start_addr = next(self._regions.irange(maximum=address, reverse=True))
+        except StopIteration:
+            return False
+        else:
+            return address < self._regions[start_addr]
+
+    def _get_min_addr(self) -> Optional[int]:
+        """
+        Get the minimum address out of all regions. We assume self._regions is sorted.
+
+        :return: The minimum address, or None if there is no such address.
+        """
+
+        if not self._regions:
+            if self.project.arch.name != "Soot":
+                l.error("self._regions is empty or not properly set.")
+            return None
+
+        return next(self._regions.irange())
+
+    def _next_address_in_regions(self, address: int) -> Optional[int]:
+        """
+        Return the next immediate address that is inside any of the regions.
+
+        :param address: The address to start scanning.
+        :return:        The next address that is inside one of the memory regions, or None if there is no such address.
+        """
+
+        if self._inside_regions(address):
+            return address
+
+        try:
+            return next(self._regions.irange(minimum=address, reverse=False))
+        except StopIteration:
+            return None
+
+    def _is_region_extremely_sparse(self, start: int, end: int, base_state: Optional["SimState"] = None) -> bool:
         """
         Check whether the given memory region is extremely sparse, i.e., all bytes are the same value.
 
-        :param int start: The beginning of the region.
-        :param int end:   The end of the region (exclusive).
+        :param start:      The beginning of the region.
+        :param end:        The end of the region (exclusive).
         :param base_state: The base state (optional).
         :return:           True if the region is extremely sparse, False otherwise.
-        :rtype:            bool
         """
 
         all_bytes = None
@@ -931,16 +1028,14 @@ class CFGBase(Analysis):
         for goout_site, type_ in [(site, "jumpout") for site in func.jumpout_sites] + [
             (site, "retout") for site in func.retout_sites
         ]:
-
             # determine where it jumps/returns to
             goout_site_successors = goout_site.successors()
             # Filter out UnresolvableJumpTarget because those don't mean that we actually know where it jumps to
-            known_successors = list(
-                filter(
-                    lambda n: not (isinstance(n, HookNode) and n.sim_procedure == UnresolvableJumpTarget),
-                    goout_site_successors,
-                )
-            )
+            known_successors = [
+                n
+                for n in goout_site_successors
+                if not (isinstance(n, HookNode) and n.sim_procedure == UnresolvableJumpTarget)
+            ]
 
             if not known_successors:
                 # not sure where it jumps to. bail out
@@ -1161,7 +1256,6 @@ class CFGBase(Analysis):
     def _normalize_core(
         self, graph: networkx.DiGraph, callstack_key, smallest_node, other_nodes, smallest_nodes, end_addresses_to_nodes
     ):
-
         # Break other nodes
         for n in other_nodes:
             new_size = get_real_address_if_arm(self.project.arch, smallest_node.addr) - get_real_address_if_arm(
@@ -1476,7 +1570,6 @@ class CFGBase(Analysis):
         max_stage_2_progress = 90.0
         nodes_count = len(function_nodes)
         for i, fn in enumerate(sorted(function_nodes, key=lambda n: n.addr)):
-
             if self._low_priority:
                 self._release_gil(i, 800, 0.000001)
 
@@ -1518,7 +1611,6 @@ class CFGBase(Analysis):
 
         nodes_count = len(secondary_function_nodes)
         for i, fn in enumerate(sorted(secondary_function_nodes, key=lambda n: n.addr)):
-
             if self._show_progressbar or self._progress_callback:
                 progress = min_stage_3_progress + (max_stage_3_progress - min_stage_3_progress) * (
                     i * 1.0 / nodes_count
@@ -1637,7 +1729,6 @@ class CFGBase(Analysis):
         all_func_addrs = sorted(set(functions.keys()))
 
         for func_pos, (func_addr, function) in enumerate(functions.items()):
-
             if func_addr in functions_to_remove:
                 continue
 
@@ -1667,7 +1758,7 @@ class CFGBase(Analysis):
             if not function.endpoints:
                 # Function should have at least one endpoint
                 continue
-            endpoint_addr = max([a.addr for a in function.endpoints])
+            endpoint_addr = max(a.addr for a in function.endpoints)
             the_endpoint = next(a for a in function.endpoints if a.addr == endpoint_addr)
             endpoint_addr += the_endpoint.size
 
@@ -2012,7 +2103,7 @@ class CFGBase(Analysis):
 
         def _has_more_than_one_exit(node_):
             # Do not consider FakeRets as counting as multiple exits here.
-            out_edges = list(filter(lambda x: g.get_edge_data(*x)["jumpkind"] != "Ijk_FakeRet", g.out_edges(node_)))
+            out_edges = [e for e in g.out_edges(node_) if g.get_edge_data(*e)["jumpkind"] != "Ijk_FakeRet"]
             return len(out_edges) > 1
 
         if len(src_function.block_addrs_set) > 10:
@@ -2115,7 +2206,7 @@ class CFGBase(Analysis):
 
                     jumpkind = data.get("jumpkind", "")
                     if not (jumpkind == "Ijk_Call" or jumpkind.startswith("Ijk_Sys")):
-                        # Only follow none call edges
+                        # Only follow non call edges
                         if dst not in stack and dst not in traversed:
                             stack.add(dst)
 
@@ -2169,7 +2260,6 @@ class CFGBase(Analysis):
         stmt_idx = data.get("stmt_idx", None)
 
         if jumpkind == "Ijk_Call" or jumpkind.startswith("Ijk_Sys"):
-
             is_syscall = jumpkind.startswith("Ijk_Sys")
 
             # It must be calling a function
@@ -2216,7 +2306,7 @@ class CFGBase(Analysis):
                     else:
                         self._addr_to_function(returning_target, blockaddr_to_function, known_functions)
 
-                to_outside = not blockaddr_to_function[returning_target] is src_function
+                to_outside = blockaddr_to_function[returning_target] is not src_function
 
                 n = self.model.get_any_node(returning_target)
                 if n is None:
@@ -2234,7 +2324,6 @@ class CFGBase(Analysis):
                     )
 
         elif jumpkind in ("Ijk_Boring", "Ijk_InvalICache", "Ijk_Exception"):
-
             # convert src_addr and dst_addr to CodeNodes
             n = self.model.get_any_node(src_addr)
             if n is None:
@@ -2309,7 +2398,6 @@ class CFGBase(Analysis):
                 )
 
         elif jumpkind == "Ijk_FakeRet":
-
             # convert src_addr and dst_addr to CodeNodes
             n = self.model.get_any_node(src_addr)
             if n is None:
@@ -2356,7 +2444,7 @@ class CFGBase(Analysis):
             if called_function is not None and called_function.returning is False:
                 return
 
-            to_outside = not target_function is src_function
+            to_outside = target_function is not src_function
 
             confirmed = called_function is None or called_function.returning is True
             self.kb.functions._add_fakeret_to(
@@ -2647,7 +2735,7 @@ class CFGBase(Analysis):
         resolved, resolved_targets = self._resolve_indirect_jump_timelessly(addr, irsb, func_addr, jumpkind)
         if resolved:
             l.debug(
-                "Indirect jump at block %#x is resolved by a timeless indirect jump resolver. " "%d targets found.",
+                "Indirect jump at block %#x is resolved by a timeless indirect jump resolver. %d targets found.",
                 addr,
                 len(resolved_targets),
             )

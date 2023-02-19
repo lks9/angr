@@ -36,7 +36,6 @@ def D(*edge):
 
 
 def test_region_identifier_0():
-
     g = networkx.DiGraph()
 
     #
@@ -67,7 +66,6 @@ def test_region_identifier_0():
 
 
 def test_region_identifier_1():
-
     g = networkx.DiGraph()
 
     #
@@ -107,7 +105,6 @@ def test_region_identifier_1():
 
 
 def test_smoketest():
-
     p = angr.Project(os.path.join(test_location, "x86_64", "all"), auto_load_libs=False, load_debug_info=True)
     cfg = p.analyses.CFG(data_references=True, normalize=True)
 
@@ -120,14 +117,13 @@ def test_smoketest():
     ri = p.analyses.RegionIdentifier(main_func, graph=clinic.graph)
 
     # structure it
-    st = p.analyses[DreamStructurer].prep()(ri.region)  # pylint:disable=unused-variable
+    st = p.analyses[DreamStructurer].prep()(ri.region)
 
     # simplify it
     _ = p.analyses.RegionSimplifier(main_func, st.result)
 
 
 def test_smoketest_cm3_firmware():
-
     p = angr.Project(
         os.path.join(test_location, "armel", "i2c_master_read-nucleol152re.elf"),
         auto_load_libs=False,
@@ -144,11 +140,10 @@ def test_smoketest_cm3_firmware():
     ri = p.analyses.RegionIdentifier(main_func, graph=clinic.graph)
 
     # structure it
-    st = p.analyses[DreamStructurer].prep()(ri.region)  # pylint:disable=unused-variable
+    p.analyses[DreamStructurer].prep()(ri.region)
 
 
 def test_simple():
-
     p = angr.Project(os.path.join(test_location, "x86_64", "all"), auto_load_libs=False, load_debug_info=True)
     cfg = p.analyses.CFG(data_references=True, normalize=True)
 
@@ -171,7 +166,6 @@ def test_simple():
 
 
 def test_simple_loop():
-
     p = angr.Project(
         os.path.join(test_location, "x86_64", "cfg_loop_unrolling"), auto_load_libs=False, load_debug_info=True
     )

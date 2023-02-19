@@ -1,5 +1,5 @@
 # pylint:disable=missing-class-docstring
-from typing import List, Tuple, Any, Optional, Union, Dict
+from typing import List, Tuple, Any, Optional, Union, OrderedDict as ODict
 
 import claripy
 import ailment
@@ -13,7 +13,6 @@ class EmptyBlockNotice(Exception):
 
 
 class MultiNode:
-
     __slots__ = (
         "nodes",
         "addr",
@@ -21,7 +20,6 @@ class MultiNode:
     )
 
     def __init__(self, nodes, addr=None, idx=None):
-
         # delayed import
         from ..graph_region import GraphRegion  # pylint:disable=import-outside-toplevel
 
@@ -42,7 +40,6 @@ class MultiNode:
         return MultiNode(self.nodes[::], addr=self.addr, idx=self.idx)
 
     def __repr__(self):
-
         addrs = []
         s = ""
         for node in self.nodes:
@@ -61,7 +58,6 @@ class MultiNode:
 
 
 class BaseNode:
-
     __slots__ = ()
 
     @staticmethod
@@ -79,7 +75,6 @@ class BaseNode:
 
     @staticmethod
     def test_empty_condition_node(cond_node):
-
         for node in [cond_node.true_node, cond_node.false_node]:
             if node is None:
                 continue
@@ -97,7 +92,6 @@ class BaseNode:
 
 
 class SequenceNode(BaseNode):
-
     __slots__ = (
         "addr",
         "nodes",
@@ -138,7 +132,6 @@ class SequenceNode(BaseNode):
 
 
 class CodeNode(BaseNode):
-
     __slots__ = (
         "node",
         "reaching_condition",
@@ -193,7 +186,6 @@ class CodeNode(BaseNode):
 
 
 class ConditionNode(BaseNode):
-
     __slots__ = (
         "addr",
         "node",
@@ -234,7 +226,6 @@ class ConditionNode(BaseNode):
 
 
 class CascadingConditionNode(BaseNode):
-
     __slots__ = (
         "addr",
         "condition_and_nodes",
@@ -248,7 +239,6 @@ class CascadingConditionNode(BaseNode):
 
 
 class LoopNode(BaseNode):
-
     __slots__ = (
         "sort",
         "condition",
@@ -301,7 +291,6 @@ class LoopNode(BaseNode):
 
 
 class BreakNode(BaseNode):
-
     __slots__ = (
         "addr",
         "target",
@@ -313,7 +302,6 @@ class BreakNode(BaseNode):
 
 
 class ContinueNode(BaseNode):
-
     __slots__ = (
         "addr",
         "target",
@@ -325,7 +313,6 @@ class ContinueNode(BaseNode):
 
 
 class ConditionalBreakNode(BreakNode):
-
     __slots__ = ("condition",)
 
     def __init__(self, addr, condition, target):
@@ -337,7 +324,6 @@ class ConditionalBreakNode(BreakNode):
 
 
 class SwitchCaseNode(BaseNode):
-
     __slots__ = (
         "switch_expr",
         "cases",
@@ -345,9 +331,9 @@ class SwitchCaseNode(BaseNode):
         "addr",
     )
 
-    def __init__(self, switch_expr, cases, default_node, addr=None):
+    def __init__(self, switch_expr, cases: ODict[Union[int, Tuple[int, ...]], SequenceNode], default_node, addr=None):
         self.switch_expr = switch_expr
-        self.cases: Dict[Union[int, Tuple[int]], SequenceNode] = cases
+        self.cases: ODict[Union[int, Tuple[int, ...]], SequenceNode] = cases
         self.default_node = default_node
         self.addr = addr
 
@@ -360,10 +346,10 @@ class IncompleteSwitchCaseNode(BaseNode):
 
     __slots__ = ("addr", "head", "cases")
 
-    def __init__(self, addr, head, cases):
+    def __init__(self, addr, head, cases: List):
         self.addr = addr
         self.head = head
-        self.cases = cases
+        self.cases: List = cases
 
 
 #

@@ -325,7 +325,6 @@ class CFunction(CConstruct):  # pylint:disable=abstract-method
         demangled_name=None,
         **kwargs,
     ):
-
         super().__init__(**kwargs)
 
         self.addr = addr
@@ -385,7 +384,6 @@ class CFunction(CConstruct):  # pylint:disable=abstract-method
         for variable, cvar_and_vartypes in sorted(
             unified_to_var_and_types.items(), key=lambda x: _varname_to_id(x[0].name) if x[0].name else 0
         ):
-
             yield indent_str, None
 
             # pick the first cvariable
@@ -444,7 +442,6 @@ class CFunction(CConstruct):  # pylint:disable=abstract-method
             yield "\n", None
 
     def c_repr_chunks(self, indent=0, asexpr=False):
-
         indent_str = self.indent_str(indent)
 
         if self.codegen.show_local_types:
@@ -598,15 +595,15 @@ class CStatements(CStatement):
     __slots__ = ("statements",)
 
     def __init__(self, statements, **kwargs):
-
         super().__init__(**kwargs)
 
         self.statements = statements
 
     def c_repr_chunks(self, indent=0, asexpr=False):
-
         for stmt in self.statements:
-            yield from stmt.c_repr_chunks(indent=indent)
+            yield from stmt.c_repr_chunks(indent=indent, asexpr=asexpr)
+            if asexpr:
+                yield ", ", None
 
 
 class CAILBlock(CStatement):
@@ -617,13 +614,11 @@ class CAILBlock(CStatement):
     __slots__ = ("block",)
 
     def __init__(self, block, **kwargs):
-
         super().__init__(**kwargs)
 
         self.block = block
 
     def c_repr_chunks(self, indent=0, asexpr=False):
-
         indent_str = self.indent_str(indent=indent)
         r = str(self.block)
         for stmt in r.split("\n"):
@@ -652,7 +647,6 @@ class CWhileLoop(CLoop):
     )
 
     def __init__(self, condition, body, tags=None, **kwargs):
-
         super().__init__(**kwargs)
 
         self.condition = condition
@@ -660,7 +654,6 @@ class CWhileLoop(CLoop):
         self.tags = tags
 
     def c_repr_chunks(self, indent=0, asexpr=False):
-
         indent_str = self.indent_str(indent=indent)
 
         yield indent_str, None
@@ -702,7 +695,6 @@ class CDoWhileLoop(CLoop):
     )
 
     def __init__(self, condition, body, tags=None, **kwargs):
-
         super().__init__(**kwargs)
 
         self.condition = condition
@@ -710,7 +702,6 @@ class CDoWhileLoop(CLoop):
         self.tags = tags
 
     def c_repr_chunks(self, indent=0, asexpr=False):
-
         indent_str = self.indent_str(indent=indent)
         brace = CClosingObject("{")
         paren = CClosingObject("(")
@@ -808,7 +799,6 @@ class CIfElse(CStatement):
     def __init__(
         self, condition_and_nodes: List[Tuple[CExpression, Optional[CStatement]]], else_node=None, tags=None, **kwargs
     ):
-
         super().__init__(**kwargs)
 
         self.condition_and_nodes = condition_and_nodes
@@ -819,7 +809,6 @@ class CIfElse(CStatement):
             raise ValueError("You must specify at least one condition")
 
     def c_repr_chunks(self, indent=0, asexpr=False):
-
         indent_str = self.indent_str(indent=indent)
         paren = CClosingObject("(")
         brace = CClosingObject("{")
@@ -827,7 +816,6 @@ class CIfElse(CStatement):
         first_node = True
 
         for condition, node in self.condition_and_nodes:
-
             if first_node:
                 first_node = False
                 yield indent_str, None
@@ -888,14 +876,12 @@ class CIfBreak(CStatement):
     )
 
     def __init__(self, condition, tags=None, **kwargs):
-
         super().__init__(**kwargs)
 
         self.condition = condition
         self.tags = tags
 
     def c_repr_chunks(self, indent=0, asexpr=False):
-
         indent_str = self.indent_str(indent=indent)
         paren = CClosingObject("(")
         brace = CClosingObject("{")
@@ -931,7 +917,6 @@ class CBreak(CStatement):
         self.tags = tags
 
     def c_repr_chunks(self, indent=0, asexpr=False):
-
         indent_str = self.indent_str(indent=indent)
 
         yield indent_str, None
@@ -950,7 +935,6 @@ class CContinue(CStatement):
         self.tags = tags
 
     def c_repr_chunks(self, indent=0, asexpr=False):
-
         indent_str = self.indent_str(indent=indent)
 
         yield indent_str, None
@@ -973,7 +957,6 @@ class CSwitchCase(CStatement):
         self.tags = tags
 
     def c_repr_chunks(self, indent=0, asexpr=False):
-
         indent_str = self.indent_str(indent=indent)
         paren = CClosingObject("(")
         brace = CClosingObject("{")
@@ -1028,7 +1011,6 @@ class CAssignment(CStatement):
     )
 
     def __init__(self, lhs, rhs, tags=None, **kwargs):
-
         super().__init__(**kwargs)
 
         self.lhs = lhs
@@ -1036,7 +1018,6 @@ class CAssignment(CStatement):
         self.tags = tags
 
     def c_repr_chunks(self, indent=0, asexpr=False):
-
         indent_str = self.indent_str(indent=indent)
 
         yield indent_str, None
@@ -1162,7 +1143,6 @@ class CFunctionCall(CStatement, CExpression):
 
 
 class CReturn(CStatement):
-
     __slots__ = (
         "retval",
         "tags",
@@ -1175,7 +1155,6 @@ class CReturn(CStatement):
         self.tags = tags
 
     def c_repr_chunks(self, indent=0, asexpr=False):
-
         indent_str = self.indent_str(indent=indent)
 
         if not self.retval:
@@ -1189,7 +1168,6 @@ class CReturn(CStatement):
 
 
 class CGoto(CStatement):
-
     __slots__ = (
         "target",
         "target_idx",
@@ -1243,7 +1221,6 @@ class CUnsupportedStatement(CStatement):
         self.stmt = stmt
 
     def c_repr_chunks(self, indent=0, asexpr=False):
-
         indent_str = self.indent_str(indent=indent)
 
         yield indent_str, None
@@ -1279,7 +1256,6 @@ class CLabel(CStatement):
 
 
 class CStructField(CExpression):
-
     __slots__ = (
         "struct_type",
         "offset",
@@ -1288,7 +1264,6 @@ class CStructField(CExpression):
     )
 
     def __init__(self, struct_type: SimStruct, offset, field, tags=None, **kwargs):
-
         super().__init__(**kwargs)
 
         self.struct_type = struct_type
@@ -1343,7 +1318,6 @@ class CVariable(CExpression):
     )
 
     def __init__(self, variable: SimVariable, unified_variable=None, variable_type=None, tags=None, **kwargs):
-
         super().__init__(**kwargs)
 
         self.variable: SimVariable = variable
@@ -1454,7 +1428,6 @@ class CUnaryOp(CExpression):
     )
 
     def __init__(self, op, operand: CExpression, tags=None, **kwargs):
-
         super().__init__(**kwargs)
 
         self.op = op
@@ -1764,7 +1737,6 @@ class CBinaryOp(CExpression):
 
 
 class CTypeCast(CExpression):
-
     __slots__ = (
         "src_type",
         "dst_type",
@@ -1807,7 +1779,6 @@ class CTypeCast(CExpression):
 
 
 class CConstant(CExpression):
-
     __slots__ = (
         "value",
         "reference_values",
@@ -1815,7 +1786,6 @@ class CConstant(CExpression):
     )
 
     def __init__(self, value, type_: SimType, reference_values=None, tags: Optional[Dict] = None, **kwargs):
-
         super().__init__(**kwargs)
 
         self.value = value
@@ -1944,14 +1914,12 @@ class CConstant(CExpression):
 
 
 class CRegister(CExpression):
-
     __slots__ = (
         "reg",
         "tags",
     )
 
     def __init__(self, reg, tags=None, **kwargs):
-
         super().__init__(**kwargs)
 
         self.reg = reg
@@ -1967,7 +1935,6 @@ class CRegister(CExpression):
 
 
 class CITE(CExpression):
-
     __slots__ = (
         "cond",
         "iftrue",
@@ -1997,6 +1964,31 @@ class CITE(CExpression):
         yield from self.iftrue.c_repr_chunks()
         yield " : ", self
         yield from self.iffalse.c_repr_chunks()
+        yield ")", paren
+
+
+class CMultiStatementExpression(CExpression):
+    """
+    (stmt0, stmt1, stmt2, expr)
+    """
+
+    __slots__ = ("stmts", "expr", "tags")
+
+    def __init__(self, stmts: CStatements, expr: CExpression, tags=None, **kwargs):
+        super().__init__(**kwargs)
+        self.stmts = stmts
+        self.expr = expr
+        self.tags = tags
+
+    @property
+    def type(self):
+        return self.expr.type
+
+    def c_repr_chunks(self, indent=0, asexpr=False):
+        paren = CClosingObject("(")
+        yield "(", paren
+        yield from self.stmts.c_repr_chunks(indent=0, asexpr=True)
+        yield from self.expr.c_repr_chunks()
         yield ")", paren
 
 
@@ -2091,6 +2083,7 @@ class CStructuredCodeGenerator(BaseStructuredCodeGenerator, Analysis):
             Expr.DirtyExpression: self._handle_Expr_Dirty,
             Expr.ITE: self._handle_Expr_ITE,
             Expr.Reinterpret: self._handle_Reinterpret,
+            Expr.MultiStatementExpression: self._handle_MultiStatementExpression,
         }
 
         self._func = func
@@ -2146,7 +2139,6 @@ class CStructuredCodeGenerator(BaseStructuredCodeGenerator, Analysis):
                 self.show_externs = value
 
     def _analyze(self):
-
         self._variables_in_use = {}
 
         # memo
@@ -2616,7 +2608,6 @@ class CStructuredCodeGenerator(BaseStructuredCodeGenerator, Analysis):
     #
 
     def _handle(self, node, is_expr: bool = True):
-
         if (node, is_expr) in self.ailexpr2cnode:
             return self.ailexpr2cnode[(node, is_expr)]
 
@@ -2632,11 +2623,9 @@ class CStructuredCodeGenerator(BaseStructuredCodeGenerator, Analysis):
         raise UnsupportedNodeTypeError("Node type %s is not supported yet." % type(node))
 
     def _handle_Code(self, node):
-
         return self._handle(node.node, is_expr=False)
 
     def _handle_Sequence(self, seq):
-
         lines = []
 
         for node in seq.nodes:
@@ -2724,7 +2713,6 @@ class CStructuredCodeGenerator(BaseStructuredCodeGenerator, Analysis):
         return CBreak(tags=tags, codegen=self)
 
     def _handle_MultiNode(self, node):
-
         lines = []
 
         for n in node.nodes:
@@ -2811,7 +2799,6 @@ class CStructuredCodeGenerator(BaseStructuredCodeGenerator, Analysis):
         return CAssignment(cdst, csrc, tags=stmt.tags, codegen=self)
 
     def _handle_Stmt_Call(self, stmt: Stmt.Call, is_expr: bool = False):
-
         try:
             # Try to handle it as a normal function call
             if not isinstance(stmt.target, str):
@@ -2907,7 +2894,6 @@ class CStructuredCodeGenerator(BaseStructuredCodeGenerator, Analysis):
     #
 
     def _handle_Expr_Register(self, expr: Expr.Register):
-
         if expr.variable:
             return self._variable(expr.variable, expr.size)
         else:
@@ -2916,9 +2902,11 @@ class CStructuredCodeGenerator(BaseStructuredCodeGenerator, Analysis):
     def _handle_Expr_Load(self, expr: Expr.Load):
         ty = self.default_simtype_from_size(expr.size)
 
-        def negotiate(old_ty, proposed_ty):
+        def negotiate(old_ty: SimType, proposed_ty: SimType) -> SimType:
             if old_ty.size == proposed_ty.size:
-                return proposed_ty
+                # we do not allow returning a struct for a primitive type
+                if not (isinstance(proposed_ty, SimStruct) and not isinstance(old_ty, SimStruct)):
+                    return proposed_ty
             return old_ty
 
         if expr.variable is not None:
@@ -3070,8 +3058,12 @@ class CStructuredCodeGenerator(BaseStructuredCodeGenerator, Analysis):
         dst_type = _to_type(expr.to_bits, expr.to_type)
         return CTypeCast(src_type, dst_type, self._handle(expr.operand), tags=expr.tags, codegen=self)
 
-    def _handle_Expr_StackBaseOffset(self, expr: StackBaseOffset):
+    def _handle_MultiStatementExpression(self, expr: Expr.MultiStatementExpression):
+        cstmts = CStatements([self._handle(stmt, is_expr=False) for stmt in expr.stmts], codegen=self)
+        cexpr = self._handle(expr.expr)
+        return CMultiStatementExpression(cstmts, cexpr, tags=expr.tags, codegen=self)
 
+    def _handle_Expr_StackBaseOffset(self, expr: StackBaseOffset):
         if expr.variable is not None:
             var_thing = self._variable(expr.variable, expr.size)
             var_thing.tags = dict(expr.tags)

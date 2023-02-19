@@ -11,7 +11,6 @@ l = logging.getLogger("angr.engines.soot.values.arrayref")
 
 
 class SimSootValue_ArrayBaseRef(SimSootValue):
-
     __slots__ = ["id", "element_type", "size", "_default_value_generator", "type"]
 
     def __init__(self, heap_alloc_id, element_type, size, default_value_generator=None):
@@ -49,7 +48,6 @@ class SimSootValue_ArrayBaseRef(SimSootValue):
 
 
 class SimSootValue_ArrayRef(SimSootValue):
-
     __slots__ = ["id", "base", "index"]
 
     def __init__(self, base, index):
@@ -107,7 +105,7 @@ class SimSootValue_ArrayRef(SimSootValue):
         # For now we just constraint the index to stay within the bounds
 
         # raise exception, if index is *always* invalid
-        if not True in idx_stays_within_bounds:
+        if True not in idx_stays_within_bounds:
             raise SimEngineError(
                 "Access of %s[%s] (length %s) is always invalid. "
                 "Cannot continue w/o raising java.lang.ArrayIndexOutOfBoundsException."

@@ -268,10 +268,9 @@ class SimEngineVRAIL(
         return richr
 
     def _ail_handle_ITE(self, expr: ailment.Expr.ITE):
-        # pylint:disable=unused-variable
-        cond = self._expr(expr.cond)
-        r0 = self._expr(expr.iftrue)
-        r1 = self._expr(expr.iffalse)
+        self._expr(expr.cond)  # cond
+        self._expr(expr.iftrue)  # r0
+        self._expr(expr.iffalse)  # r1
 
         return RichR(self.state.top(expr.bits))
 
@@ -289,7 +288,6 @@ class SimEngineVRAIL(
     _ail_handle_CmpGE = _ail_handle_Cmp
 
     def _ail_handle_Add(self, expr):
-
         arg0, arg1 = expr.operands
 
         r0 = self._expr(arg0)
@@ -322,7 +320,6 @@ class SimEngineVRAIL(
         )
 
     def _ail_handle_Sub(self, expr):
-
         arg0, arg1 = expr.operands
 
         r0 = self._expr(arg0)
@@ -347,7 +344,6 @@ class SimEngineVRAIL(
         )
 
     def _ail_handle_Mul(self, expr):
-
         arg0, arg1 = expr.operands
 
         r0 = self._expr(arg0)
@@ -365,7 +361,6 @@ class SimEngineVRAIL(
         )
 
     def _ail_handle_Mull(self, expr):
-
         arg0, arg1 = expr.operands
 
         r0 = self._expr(arg0)
@@ -393,7 +388,6 @@ class SimEngineVRAIL(
         )
 
     def _ail_handle_Div(self, expr):
-
         arg0, arg1 = expr.operands
 
         r0 = self._expr(arg0)
@@ -415,25 +409,24 @@ class SimEngineVRAIL(
         )
 
     def _ail_handle_DivMod(self, expr: ailment.Expr.BinaryOp):
-
         arg0, arg1 = expr.operands
 
         r0 = self._expr(arg0)
         r1 = self._expr(arg1)
-        from_size = expr.bits
-        to_size = r1.bits
+        from_size = r1.bits
+        to_size = r0.bits
 
         if expr.signed:
-            quotient = r0.data.SDiv(claripy.SignExt(from_size - to_size, r1.data))
-            remainder = r0.data.SMod(claripy.SignExt(from_size - to_size, r1.data))
+            quotient = r0.data.SDiv(claripy.SignExt(to_size - from_size, r1.data))
+            remainder = r0.data.SMod(claripy.SignExt(to_size - from_size, r1.data))
             quotient_size = to_size
             remainder_size = to_size
             r = claripy.Concat(
                 claripy.Extract(remainder_size - 1, 0, remainder), claripy.Extract(quotient_size - 1, 0, quotient)
             )
         else:
-            quotient = r0.data // claripy.ZeroExt(from_size - to_size, r1.data)
-            remainder = r0.data % claripy.ZeroExt(from_size - to_size, r1.data)
+            quotient = r0.data // claripy.ZeroExt(to_size - from_size, r1.data)
+            remainder = r0.data % claripy.ZeroExt(to_size - from_size, r1.data)
             quotient_size = to_size
             remainder_size = to_size
             r = claripy.Concat(
@@ -446,7 +439,6 @@ class SimEngineVRAIL(
         )
 
     def _ail_handle_Xor(self, expr):
-
         arg0, arg1 = expr.operands
 
         r0 = self._expr(arg0)
@@ -464,7 +456,6 @@ class SimEngineVRAIL(
         )
 
     def _ail_handle_Shl(self, expr):
-
         arg0, arg1 = expr.operands
 
         r0 = self._expr(arg0)
@@ -484,7 +475,6 @@ class SimEngineVRAIL(
         return RichR(r0.data << shiftamount, typevar=typeconsts.int_type(result_size), type_constraints=None)
 
     def _ail_handle_Shr(self, expr):
-
         arg0, arg1 = expr.operands
 
         r0 = self._expr(arg0)
@@ -506,7 +496,6 @@ class SimEngineVRAIL(
         )
 
     def _ail_handle_Sal(self, expr):
-
         arg0, arg1 = expr.operands
 
         r0 = self._expr(arg0)
@@ -526,7 +515,6 @@ class SimEngineVRAIL(
         return RichR(r0.data << shiftamount, typevar=typeconsts.int_type(result_size), type_constraints=None)
 
     def _ail_handle_Sar(self, expr):
-
         arg0, arg1 = expr.operands
 
         r0 = self._expr(arg0)
@@ -546,7 +534,6 @@ class SimEngineVRAIL(
         return RichR(r0.data >> shiftamount, typevar=typeconsts.int_type(result_size), type_constraints=None)
 
     def _ail_handle_And(self, expr):
-
         arg0, arg1 = expr.operands
 
         r0 = self._expr(arg0)
@@ -564,7 +551,6 @@ class SimEngineVRAIL(
         return RichR(r, typevar=r0.typevar)
 
     def _ail_handle_Or(self, expr):
-
         arg0, arg1 = expr.operands
 
         r0 = self._expr(arg0)
@@ -582,7 +568,6 @@ class SimEngineVRAIL(
         return RichR(r, typevar=r0.typevar)
 
     def _ail_handle_Concat(self, expr):
-
         arg0, arg1 = expr.operands
 
         _ = self._expr(arg0)

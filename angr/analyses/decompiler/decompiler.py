@@ -1,7 +1,7 @@
 # pylint:disable=unused-import
 import logging
 from collections import defaultdict
-from typing import List, Tuple, Optional, Iterable, Union, Type, Set, Dict, Any
+from typing import List, Tuple, Optional, Iterable, Union, Type, Set, Dict, Any, TYPE_CHECKING
 
 from cle import SymbolType
 import ailment
@@ -18,7 +18,10 @@ from .ailgraph_walker import AILGraphWalker
 from .condition_processor import ConditionProcessor
 from .decompilation_options import DecompilationOption
 from .decompilation_cache import DecompilationCache
+from .utils import remove_labels
 
+if TYPE_CHECKING:
+    from .peephole_optimizations.base import PeepholeOptimizationStmtBase, PeepholeOptimizationExprBase
 
 l = logging.getLogger(name=__name__)
 
@@ -81,7 +84,6 @@ class Decompiler(Analysis):
             self._decompile()
 
     def _decompile(self):
-
         if self.func.is_simprocedure:
             return
 
@@ -136,7 +138,8 @@ class Decompiler(Analysis):
         cache.binop_operators = binop_operators
 
         # convert function blocks to AIL blocks
-        progress_callback = lambda p, **kwargs: self._update_progress(p * (70 - 5) / 100.0 + 5, **kwargs)
+        def progress_callback(p, **kwargs):
+            return self._update_progress(p * (70 - 5) / 100.0 + 5, **kwargs)
 
         if self._regen_clinic or old_clinic is None or self.func.prototype is None:
             clinic = self.project.analyses.Clinic(
@@ -193,6 +196,9 @@ class Decompiler(Analysis):
             clinic.reaching_definitions,
             ite_exprs=ite_exprs,
         )
+
+        # save the graph before structuring happens (for AIL view)
+        clinic.cc_graph = remove_labels(clinic.copy_graph())
         self._update_progress(75.0, text="Structuring code")
 
         # structure it
@@ -205,7 +211,13 @@ class Decompiler(Analysis):
         self._update_progress(80.0, text="Simplifying regions")
 
         # simplify it
-        s = self.project.analyses.RegionSimplifier(self.func, rs.result, kb=self.kb, variable_kb=clinic.variable_kb)
+        s = self.project.analyses.RegionSimplifier(
+            self.func,
+            rs.result,
+            kb=self.kb,
+            variable_kb=clinic.variable_kb,
+            **self.options_to_params(self.options_by_class["region_simplifier"]),
+        )
         seq_node = s.result
         seq_node = self._run_post_structuring_simplification_passes(seq_node, binop_operators=cache.binop_operators)
         self._update_progress(85.0, text="Generating code")
@@ -251,7 +263,6 @@ class Decompiler(Analysis):
 
         # run each pass
         for pass_ in self._optimization_passes:
-
             # only for post region id opts
             if pass_.STAGE != OptimizationPassStage.BEFORE_REGION_IDENTIFICATION:
                 continue
@@ -303,7 +314,6 @@ class Decompiler(Analysis):
 
         # run each pass
         for pass_ in self._optimization_passes:
-
             # only for post region id opts
             if pass_.STAGE != OptimizationPassStage.DURING_REGION_IDENTIFICATION:
                 continue
@@ -324,6 +334,11 @@ class Decompiler(Analysis):
                 # use the new graph
                 ail_graph = a.out_graph
 
+                # the graph might change! update them.
+                addr_and_idx_to_blocks = {}
+                addr_to_blocks = defaultdict(set)
+                AILGraphWalker(ail_graph, _updatedict_handler).walk()
+
                 cond_proc = ConditionProcessor(self.project.arch)
                 # always update RI on graph change
                 ri = self.project.analyses[RegionIdentifier].prep(kb=self.kb)(
@@ -339,9 +354,7 @@ class Decompiler(Analysis):
 
     @timethis
     def _run_post_structuring_simplification_passes(self, seq_node, **kwargs):
-
         for pass_ in self._optimization_passes:
-
             if pass_.STAGE != OptimizationPassStage.AFTER_STRUCTURING:
                 continue
 
@@ -352,7 +365,6 @@ class Decompiler(Analysis):
         return seq_node
 
     def _set_global_variables(self):
-
         global_variables = self.kb.variables["global"]
         for symbol in self.project.loader.main_object.symbols:
             if symbol.type == SymbolType.TYPE_OBJECT:

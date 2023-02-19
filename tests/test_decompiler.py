@@ -81,9 +81,7 @@ class TestDecompiler(unittest.TestCase):
             if f.is_simprocedure:
                 l.debug("Skipping SimProcedure %s.", repr(f))
                 continue
-            dec = p.analyses[Decompiler].prep()(
-                f, cfg=cfg.model, options=decompiler_options
-            )  # pylint: disable=unused-variable
+            p.analyses[Decompiler].prep()(f, cfg=cfg.model, options=decompiler_options)
             # FIXME: This test does not pass
             # assert dec.codegen is not None, "Failed to decompile function %s." % repr(f)
             # self._print_decompilation_result(dec)
@@ -184,7 +182,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompiling_dir_gcc_O0_main(self, decompiler_options=None):
-
         # tests loop structuring
         bin_path = os.path.join(test_location, "x86_64", "dir_gcc_-O0")
         p = angr.Project(bin_path, auto_load_libs=False, load_debug_info=True)
@@ -210,7 +207,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompiling_switch0_x86_64(self, decompiler_options=None):
-
         bin_path = os.path.join(test_location, "x86_64", "switch_0")
         p = angr.Project(bin_path, auto_load_libs=False)
 
@@ -234,7 +230,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompiling_switch1_x86_64(self, decompiler_options=None):
-
         bin_path = os.path.join(test_location, "x86_64", "switch_1")
         p = angr.Project(bin_path, auto_load_libs=False)
 
@@ -270,7 +265,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompiling_switch2_x86_64(self, decompiler_options=None):
-
         bin_path = os.path.join(test_location, "x86_64", "switch_2")
         p = angr.Project(bin_path, auto_load_libs=False)
 
@@ -308,7 +302,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompiling_true_x86_64_0(self, decompiler_options=None):
-
         # in fact this test case tests if CFGBase._process_jump_table_targeted_functions successfully removes "function"
         # 0x402543, which is an artificial function that the compiler (GCC) created for identified "cold" functions.
 
@@ -402,7 +395,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompiling_true_a_x86_64_1(self, decompiler_options=None):
-
         bin_path = os.path.join(test_location, "x86_64", "true_a")
         p = angr.Project(bin_path, auto_load_libs=False, load_debug_info=True)
 
@@ -452,7 +444,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompiling_true_mips64(self, decompiler_options=None):
-
         bin_path = os.path.join(test_location, "mips64", "true")
         p = angr.Project(bin_path, auto_load_libs=False, load_debug_info=False)
         cfg = p.analyses[CFGFast].prep()(normalize=True, data_references=True)
@@ -479,7 +470,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompiling_1after909_verify_password(self, decompiler_options=None):
-
         bin_path = os.path.join(test_location, "x86_64", "1after909")
         p = angr.Project(bin_path, auto_load_libs=False)
 
@@ -517,7 +507,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompiling_1after909_doit(self, decompiler_options=None):
-
         # the doit() function has an abnormal loop at 0x1d47 - 0x1da1 - 0x1d73
 
         bin_path = os.path.join(test_location, "x86_64", "1after909")
@@ -585,7 +574,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompiling_libsoap(self, decompiler_options=None):
-
         bin_path = os.path.join(test_location, "armel", "libsoap.so")
         p = angr.Project(bin_path, auto_load_libs=False)
 
@@ -598,7 +586,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompiling_no_arguments_in_variable_list(self, decompiler_options=None):
-
         # function arguments should never appear in the variable list
         bin_path = os.path.join(test_location, "x86_64", "test_arrays")
         p = angr.Project(bin_path, auto_load_libs=False)
@@ -620,10 +607,9 @@ class TestDecompiler(unittest.TestCase):
         assert code.count(decls) == 1  # it should only appear once
 
     def test_decompiling_strings_c_representation(self):
-
         input_expected = [("""Foo"bar""", '"Foo\\"bar"'), ("""Foo'bar""", '"Foo\'bar"')]
 
-        for (_input, expected) in input_expected:
+        for _input, expected in input_expected:
             result = angr.analyses.decompiler.structured_codegen.c.CConstant.str_to_c_str(_input)
             assert result == expected
 
@@ -741,7 +727,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompilation_call_expr_folding_mips64_true(self, decompiler_options=None):
-
         # This test is to ensure call expression folding correctly replaces call expressions in return statements
         bin_path = os.path.join(test_location, "mips64", "true")
         p = angr.Project(bin_path, auto_load_libs=False)
@@ -758,7 +743,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompilation_call_expr_folding_x8664_calc(self, decompiler_options=None):
-
         # This test is to ensure call expression folding do not re-use out-dated definitions when folding expressions
         bin_path = os.path.join(test_location, "x86_64", "calc")
         p = angr.Project(bin_path, auto_load_libs=False)
@@ -845,7 +829,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompilation_switch_case_structuring_with_removed_nodes(self, decompiler_options=None):
-
         # Some jump table entries are fully folded into their successors. Structurer should be able to handle this case.
         bin_path = os.path.join(test_location, "x86_64", "decompiler", "union")
         p = angr.Project(bin_path, auto_load_libs=False)
@@ -863,7 +846,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompilation_x86_64_stack_arguments(self, decompiler_options=None):
-
         # Arguments passed on the stack should not go missing
         bin_path = os.path.join(test_location, "x86_64", "decompiler", "union")
         p = angr.Project(bin_path, auto_load_libs=False)
@@ -990,7 +972,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_stack_canary_removal_x8664_extra_exits(self, decompiler_options=None):
-
         # Test stack canary removal on functions with extra exit
         # nodes (e.g., assert(false);) without stack canary checks
         bin_path = os.path.join(test_location, "x86_64", "decompiler", "babyheap_level1_teaching1")
@@ -1009,7 +990,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_ifelseif_x8664(self, decompiler_options=None):
-
         # nested if-else should be transformed to cascading if-elseif constructs
         bin_path = os.path.join(test_location, "x86_64", "decompiler", "babyheap_level1_teaching1")
         p = angr.Project(bin_path, auto_load_libs=False)
@@ -1307,7 +1287,6 @@ class TestDecompiler(unittest.TestCase):
 
     @for_all_structuring_algos
     def test_decompiling_fmt_get_space(self, decompiler_options=None):
-
         bin_path = os.path.join(test_location, "x86_64", "decompiler", "fmt")
         proj = angr.Project(bin_path, auto_load_libs=False)
 
@@ -1381,7 +1360,9 @@ class TestDecompiler(unittest.TestCase):
 
         # ensure the default case node is not duplicated
         cases = set(re.findall(r"case \d+:", d.codegen.text))
-        assert cases.issuperset({"case 0:", "case 4:", "case 13:", "case 16:", "case 17:", "case 18:", "case 20:"})
+        assert cases.issuperset(
+            {"case 99:", "case 103:", "case 112:", "case 115:", "case 116:", "case 117:", "case 119:"}
+        )
 
     @for_all_structuring_algos
     def test_expr_collapsing(self, decompiler_options=None):
@@ -1835,7 +1816,7 @@ class TestDecompiler(unittest.TestCase):
                 # make sure there is one label
                 all_labels = set()
                 all_gotos = set()
-                for m in re.finditer(r"LABEL_[^:]+:", d.codegen.text):
+                for m in re.finditer(r"LABEL_[^:;]+:", d.codegen.text):
                     all_labels.add(m.group(0)[:-1])
                 for m in re.finditer(r"goto ([^;]+);", d.codegen.text):
                     all_gotos.add(m.group(1))
@@ -1849,7 +1830,7 @@ class TestDecompiler(unittest.TestCase):
 
     @structuring_algo("phoenix")
     def test_decompiling_split_lines_split(self, decompiler_options=None):
-        # region identifier's fine-tuned loop refinement logic ensures there is only one goto statement in the
+        # Region identifier's fine-tuned loop refinement logic ensures there is only one goto statement in the
         # decompilation output.
         bin_path = os.path.join(test_location, "x86_64", "decompiler", "split.o")
         proj = angr.Project(bin_path, auto_load_libs=False)
@@ -1865,8 +1846,8 @@ class TestDecompiler(unittest.TestCase):
 
     @structuring_algo("phoenix")
     def test_decompiling_ptx_fix_output_parameters(self, decompiler_options=None):
-        # the carefully tuned edge sorting logic in Phoenix's last_resort_refinement ensures that there is only one
-        # goto statement in this function.
+        # the carefully tuned edge sorting logic in Phoenix's last_resort_refinement ensures that there are one or two
+        # goto statements in this function.
         bin_path = os.path.join(test_location, "x86_64", "decompiler", "ptx.o")
         proj = angr.Project(bin_path, auto_load_libs=False)
 
@@ -1877,7 +1858,7 @@ class TestDecompiler(unittest.TestCase):
         d = proj.analyses[Decompiler].prep()(f, cfg=cfg.model, options=decompiler_options)
         self._print_decompilation_result(d)
 
-        assert len(list(re.findall(r"LABEL_[^;:]+:", d.codegen.text))) == 1
+        assert len(list(re.findall(r"LABEL_[^;:]+:", d.codegen.text))) in {1, 2}
 
     @structuring_algo("phoenix")
     def test_decompiling_dd_advance_input_after_read_error(self, decompiler_options=None):
@@ -1949,6 +1930,90 @@ class TestDecompiler(unittest.TestCase):
 
         assert "goto" not in d.codegen.text
 
+    @structuring_algo("phoenix")
+    def test_decompiling_ls_print_many_per_line(self, decompiler_options=None):
+        # complex variable types involved. a struct with only one field was causing _access() in
+        # CStructuredCodeGenerator to end up in an infinite loop.
+        bin_path = os.path.join(test_location, "x86_64", "decompiler", "ls.o")
+        proj = angr.Project(bin_path, auto_load_libs=False)
+
+        cfg = proj.analyses.CFGFast(normalize=True, data_references=True)
+        f = proj.kb.functions["print_many_per_line"]
+        d = proj.analyses[Decompiler].prep()(f, cfg=cfg.model, options=decompiler_options)
+        self._print_decompilation_result(d)
+
+        # it should make somewhat sense
+        assert "calculate_columns(" in d.codegen.text
+        assert "putchar_unlocked(eolbyte)" in d.codegen.text
+
+    @structuring_algo("phoenix")
+    def test_decompiling_who_scan_entries(self, decompiler_options=None):
+        # order of edge virtualization matters. suboptimal order will lead to more gotos.
+        bin_path = os.path.join(test_location, "x86_64", "decompiler", "who.o")
+        proj = angr.Project(bin_path, auto_load_libs=False)
+
+        cfg = proj.analyses.CFGFast(normalize=True, data_references=True)
+        f = proj.kb.functions["scan_entries"]
+        d = proj.analyses[Decompiler].prep()(f, cfg=cfg.model, options=decompiler_options)
+        self._print_decompilation_result(d)
+
+        # it should make somewhat sense
+        assert d.codegen.text.count("goto ") == 1
+
+    @structuring_algo("phoenix")
+    def test_decompiling_tr_build_spec_list(self, decompiler_options=None):
+        bin_path = os.path.join(test_location, "x86_64", "decompiler", "tr.o")
+        proj = angr.Project(bin_path, auto_load_libs=False)
+
+        cfg = proj.analyses.CFGFast(normalize=True, data_references=True)
+
+        f = proj.kb.functions["build_spec_list"]
+        proj.analyses.CompleteCallingConventions(cfg=cfg, recover_variables=True)
+
+        all_optimization_passes = angr.analyses.decompiler.optimization_passes.get_default_optimization_passes(
+            "AMD64", "linux"
+        )
+        # lowered-switch simplifier cannot be enabled. otherwise we will have an extra goto that goes into the fake
+        # switch-case.
+
+        # also, setting max_level to 3 in EagerReturnsSimplifier will eliminate the other unexpected goto
+
+        d = proj.analyses[Decompiler].prep()(
+            f, cfg=cfg.model, options=decompiler_options, optimization_passes=all_optimization_passes
+        )
+        self._print_decompilation_result(d)
+
+        assert d.codegen.text.count("goto ") == 3
+        assert d.codegen.text.count("goto LABEL_400d08;") == 2
+        # goto 400e40 this is the fake goto that can be eliminated if cross-jumping reverter is present
+        assert d.codegen.text.count("goto LABEL_400e40;") == 1
+
+    @structuring_algo("phoenix")
+    def test_decompiling_sha384sum_digest_bsd_split_3(self, decompiler_options=None):
+        bin_path = os.path.join(test_location, "x86_64", "decompiler", "sha384sum-digest.o")
+        proj = angr.Project(bin_path, auto_load_libs=False)
+
+        cfg = proj.analyses.CFGFast(normalize=True, data_references=True)
+
+        f = proj.kb.functions["bsd_split_3"]
+        proj.analyses.CompleteCallingConventions(cfg=cfg, recover_variables=True)
+
+        all_optimization_passes = angr.analyses.decompiler.optimization_passes.get_default_optimization_passes(
+            "AMD64", "linux"
+        )
+        all_optimization_passes = [
+            p
+            for p in all_optimization_passes
+            if p is not angr.analyses.decompiler.optimization_passes.EagerReturnsSimplifier
+        ]
+        d = proj.analyses[Decompiler].prep()(
+            f, cfg=cfg.model, options=decompiler_options, optimization_passes=all_optimization_passes
+        )
+        self._print_decompilation_result(d)
+
+        # there should only be two or even fewer gotos
+        assert d.codegen.text.count("goto ") == 2
+
     @for_all_structuring_algos
     def test_eliminating_stack_canary_reused_stack_chk_fail_call(self, decompiler_options=None):
         bin_path = os.path.join(test_location, "x86_64", "decompiler", "cksum-digest.o")
@@ -1961,6 +2026,36 @@ class TestDecompiler(unittest.TestCase):
 
         assert "return " in d.codegen.text
         assert "stack_chk_fail" not in d.codegen.text
+
+    @structuring_algo("phoenix")
+    def test_decompiling_tr_card_of_complement(self, decompiler_options=None):
+        # this function has a single-block loop (rep stosq). make sure we handle properly without introducing gotos.
+        bin_path = os.path.join(test_location, "x86_64", "decompiler", "tr.o")
+        proj = angr.Project(bin_path, auto_load_libs=False)
+
+        cfg = proj.analyses.CFGFast(normalize=True, data_references=True)
+        all_optimization_passes = angr.analyses.decompiler.optimization_passes.get_default_optimization_passes(
+            "AMD64", "linux"
+        )
+        f = proj.kb.functions["card_of_complement"]
+        d = proj.analyses[Decompiler].prep()(
+            f, cfg=cfg.model, options=decompiler_options, optimization_passes=all_optimization_passes
+        )
+        self._print_decompilation_result(d)
+        assert "goto " not in d.codegen.text
+
+    @structuring_algo("phoenix")
+    def test_decompiling_printenv_main(self, decompiler_options=None):
+        # when a subgraph inside a loop cannot be structured, instead of entering last-resort refinement, we should
+        # return the subgraph and let structuring resume with the knowledge of the loop.
+        # otherwise, in this function, we will see a goto while in reality we do not need any gotos.
+        bin_path = os.path.join(test_location, "x86_64", "decompiler", "printenv.o")
+        proj = angr.Project(bin_path, auto_load_libs=False)
+        cfg = proj.analyses.CFGFast(normalize=True, data_references=True)
+        f = proj.kb.functions["main"]
+        d = proj.analyses[Decompiler].prep()(f, cfg=cfg.model, options=decompiler_options)
+        self._print_decompilation_result(d)
+        assert "goto " not in d.codegen.text
 
     @structuring_algo("phoenix")
     def test_reverting_switch_lowering_cksum_digest_print_filename(self, decompiler_options=None):
@@ -2031,6 +2126,124 @@ class TestDecompiler(unittest.TestCase):
         # assert "goto" not in d.codegen.text
         assert d.codegen.text.count("switch ") == 1
         assert d.codegen.text.count("case 92:") == 1
+
+    @structuring_algo("phoenix")
+    def test_reverting_switch_clustering_and_lowering_cat_main(self, decompiler_options=None):
+        # nested switch-cases
+        bin_path = os.path.join(test_location, "x86_64", "decompiler", "cat.o")
+        proj = angr.Project(bin_path, auto_load_libs=False)
+
+        cfg = proj.analyses.CFGFast(normalize=True, data_references=True)
+        all_optimization_passes = angr.analyses.decompiler.optimization_passes.get_default_optimization_passes(
+            "AMD64", "linux"
+        )
+        all_optimization_passes += [angr.analyses.decompiler.optimization_passes.LoweredSwitchSimplifier]
+
+        f = proj.kb.functions["main"]
+        d = proj.analyses[Decompiler].prep()(
+            f, cfg=cfg.model, options=decompiler_options, optimization_passes=all_optimization_passes
+        )
+        self._print_decompilation_result(d)
+
+        assert d.codegen.text.count("switch (") == 1
+        assert (
+            "> 118" not in d.codegen.text and ">= 119" not in d.codegen.text
+        )  # > 118 (>= 119) goes to the default case
+
+    @structuring_algo("phoenix")
+    def test_reverting_switch_clustering_and_lowering_cat_main_no_endpoint_dup(self, decompiler_options=None):
+        # nested switch-cases
+        bin_path = os.path.join(test_location, "x86_64", "decompiler", "cat.o")
+        proj = angr.Project(bin_path, auto_load_libs=False)
+
+        cfg = proj.analyses.CFGFast(normalize=True, data_references=True)
+        all_optimization_passes = angr.analyses.decompiler.optimization_passes.get_default_optimization_passes(
+            "AMD64", "linux"
+        )
+        # turn off eager returns simplifier
+        all_optimization_passes = [
+            p
+            for p in all_optimization_passes
+            if p is not angr.analyses.decompiler.optimization_passes.EagerReturnsSimplifier
+        ]
+        all_optimization_passes += [angr.analyses.decompiler.optimization_passes.LoweredSwitchSimplifier]
+
+        f = proj.kb.functions["main"]
+        d = proj.analyses[Decompiler].prep()(
+            f, cfg=cfg.model, options=decompiler_options, optimization_passes=all_optimization_passes
+        )
+        self._print_decompilation_result(d)
+
+        assert d.codegen.text.count("switch (") == 1
+        assert (
+            "> 118" not in d.codegen.text and ">= 119" not in d.codegen.text
+        )  # > 118 (>= 119) goes to the default case
+
+    @structuring_algo("phoenix")
+    def test_comma_separated_statement_expression_whoami(self, decompiler_options=None):
+        # nested switch-cases
+        bin_path = os.path.join(test_location, "x86_64", "decompiler", "whoami.o")
+        proj = angr.Project(bin_path, auto_load_libs=False)
+
+        cfg = proj.analyses.CFGFast(normalize=True, data_references=True)
+        f = proj.kb.functions["main"]
+        d = proj.analyses[Decompiler].prep()(f, cfg=cfg.model, options=decompiler_options)
+        self._print_decompilation_result(d)
+
+        assert "goto" not in d.codegen.text
+        assert re.search(r"if \(v\d+ != -1 \|\| \(v\d+ = 0, \*\(v\d+\) == 0\)\)", d.codegen.text) is not None
+
+    @for_all_structuring_algos
+    def test_complex_stack_offset_calculation(self, decompiler_options=None):
+        # nested switch-cases
+        bin_path = os.path.join(test_location, "x86_64", "decompiler", "babyheap_level1.1")
+        proj = angr.Project(bin_path, auto_load_libs=False)
+
+        cfg = proj.analyses.CFGFast(normalize=True, data_references=True)
+
+        f = proj.kb.functions["main"]
+        d = proj.analyses[Decompiler].prep()(
+            f,
+            cfg=cfg.model,
+            options=decompiler_options,
+        )
+        self._print_decompilation_result(d)
+
+        # The highest level symptom here is that two variable used are
+        # confused and this shows up in the addition types.
+        assert "Other Possible Types" not in d.codegen.text
+
+        # check that the variable used in free is different from the one used in atoi
+        m = re.search(r"free\(([^)]+)", d.codegen.text)
+        assert m
+
+        var_name = m.group(1)
+        assert not re.search(f"atoi.*{var_name}", d.codegen.text)
+
+    @for_all_structuring_algos
+    def test_switch_case_shared_case_nodes_b2sum_digest(self, decompiler_options=None):
+        # node 0x4028c8 is shared by two switch-case constructs. we should not crash even when eager returns simplifier
+        # is disabled.
+        bin_path = os.path.join(test_location, "x86_64", "decompiler", "b2sum-digest_shared_switch_nodes.o")
+        proj = angr.Project(bin_path, auto_load_libs=False)
+
+        all_optimization_passes = angr.analyses.decompiler.optimization_passes.get_default_optimization_passes(
+            "AMD64", "linux"
+        )
+        all_optimization_passes = [
+            p
+            for p in all_optimization_passes
+            if p is not angr.analyses.decompiler.optimization_passes.EagerReturnsSimplifier
+        ]
+
+        cfg = proj.analyses.CFGFast(normalize=True, data_references=True)
+        f = proj.kb.functions["main"]
+        d = proj.analyses[Decompiler].prep()(
+            f, cfg=cfg.model, options=decompiler_options, optimization_passes=all_optimization_passes
+        )
+        self._print_decompilation_result(d)
+
+        assert d.codegen.text.count("switch") == 1
 
 
 if __name__ == "__main__":

@@ -131,7 +131,6 @@ class VariableManagerInternal(Serializable):
         cmsg = self._get_cmsg()
 
         # variables
-        temp_variables = []
         register_variables = []
         stack_variables = []
         memory_variables = []
@@ -170,7 +169,6 @@ class VariableManagerInternal(Serializable):
         cmsg.accesses.extend(accesses)
 
         # unified variables
-        unified_temp_variables = []
         unified_register_variables = []
         unified_stack_variables = []
         unified_memory_variables = []
@@ -484,7 +482,6 @@ class VariableManagerInternal(Serializable):
         return next(iter(self.find_variables_by_stmt(block_addr, stmt_idx, sort)), None)
 
     def find_variables_by_stmt(self, block_addr: int, stmt_idx: int, sort: str) -> List[Tuple[SimVariable, int]]:
-
         key = block_addr, stmt_idx
 
         if key not in self._stmt_to_variable:
@@ -514,7 +511,6 @@ class VariableManagerInternal(Serializable):
         return next(iter(self.find_variables_by_atom(block_addr, stmt_idx, atom)), None)
 
     def find_variables_by_atom(self, block_addr, stmt_idx, atom) -> Set[Tuple[SimVariable, int]]:
-
         key = block_addr, stmt_idx
 
         if key not in self._atom_to_variable:
@@ -535,7 +531,6 @@ class VariableManagerInternal(Serializable):
         return self._register_region.get_variables_by_offset(reg)
 
     def get_variable_accesses(self, variable: SimVariable, same_name: bool = False) -> List[VariableAccess]:
-
         if not same_name:
             if variable in self._variable_accesses:
                 return list(self._variable_accesses[variable])

@@ -30,7 +30,6 @@ class Checker:
             self._parts = len(check_func)
 
     def _extract_integer(self, s):
-
         charset = string.digits if self._base == 10 else string.digits + "abcdefABCDEF"
 
         component = ""
@@ -68,7 +67,6 @@ class Checker:
         check_passes = False
 
         for s in some_strings:
-
             if self._length is not None:
                 s = s[: self._length]
 
@@ -189,7 +187,7 @@ class TestScanf(unittest.TestCase):
         # check the outputs
         total_outputs = 0
         for path in pg.found:
-            test_input = path.posix.dumps(0)
+            path.posix.dumps(0)
             test_output = path.posix.dumps(1)
             if test_output in expected_outputs:
                 assert expected_outputs[test_output].check(path), "Test case failed. Output is %s." % test_output

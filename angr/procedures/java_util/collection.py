@@ -2,8 +2,7 @@ import claripy
 import logging
 
 from ..java import JavaSimProcedure
-from ...engines.soot.expressions import SimSootExpr_NewArray, SimSootExpr_NullConstant
-from ...engines.soot.values import SimSootValue_StringRef, SimSootValue_ThisRef
+from ...engines.soot.values import SimSootValue_ThisRef
 
 log = logging.getLogger(name=__name__)
 
@@ -13,7 +12,6 @@ INDEX = "index"
 
 
 class GetIterator(JavaSimProcedure):
-
     __provides__ = (
         ("java.util.Collection", "iterator()"),
         ("java.util.Set", "iterator()"),

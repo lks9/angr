@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 
 
 def get_all_definitions(region: "MultiValuedMemory") -> Set["Definition"]:
-
     all_defs: Set["Definition"] = set()
 
     # MultiValuedMemory only uses ListPage internally
@@ -24,7 +23,7 @@ def get_all_definitions(region: "MultiValuedMemory") -> Set["Definition"]:
             cnt_set: Optional[Union["SimMemoryObject", Set["SimMemoryObject"]]] = page.content[idx]
             if cnt_set is None:
                 continue
-            elif not type(cnt_set) is set:
+            elif type(cnt_set) is not set:
                 cnt_set = {cnt_set}
             for cnt in cnt_set:
                 for def_ in LiveDefinitions.extract_defs(cnt.object):

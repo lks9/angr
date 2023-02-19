@@ -81,7 +81,6 @@ class RegionIdentifier(Analysis):
         return subgraph
 
     def _analyze(self):
-
         # make a copy of the graph
         graph = networkx.DiGraph(self._graph)
 
@@ -146,7 +145,6 @@ class RegionIdentifier(Analysis):
             raise RuntimeError("Cannot find the start node from the graph!") from ex
 
     def _test_reducibility(self):
-
         # make a copy of the graph
         graph = networkx.DiGraph(self._graph)
 
@@ -154,7 +152,6 @@ class RegionIdentifier(Analysis):
         self._make_supergraph(graph)
 
         while True:
-
             changed = False
 
             # find a node with a back-edge, remove the edge (deleting the loop), and replace it with a MultiNode
@@ -175,7 +172,6 @@ class RegionIdentifier(Analysis):
         return False
 
     def _make_supergraph(self, graph: networkx.DiGraph):
-
         while True:
             for src, dst, data in graph.edges(data=True):
                 type_ = data.get("type", None)
@@ -190,7 +186,6 @@ class RegionIdentifier(Analysis):
                 break
 
     def _find_loop_headers(self, graph: networkx.DiGraph) -> List:
-
         heads = {t for _, t in dfs_back_edges(graph, self._start_node)}
         return CFGUtils.quasi_topological_sort_nodes(graph, heads)
 
@@ -300,6 +295,22 @@ class RegionIdentifier(Analysis):
             for newnode, exits in newnode_to_initial_exits.items():
                 for exit_ in exits:
                     initial_exit_to_newnodes[exit_].add(newnode)
+
+            # filter initial_exit_to_newnodes and remove the subtrees with nodes that are reachable from nodes that are
+            # outside the current subtree
+            for initial_exit, subtree in list(initial_exit_to_newnodes.items()):
+                subtree_preds = set()
+                for node in subtree:
+                    preds = set(graph.predecessors(node))
+                    subtree_preds |= {pred for pred in preds if pred not in subtree}
+                    if len(subtree_preds) > 1:
+                        # early break
+                        break
+
+                if len(subtree_preds) > 1:
+                    # there is more than one out-of-tree predecessor. remove this subtree
+                    del initial_exit_to_newnodes[initial_exit]
+
             if initial_exit_to_newnodes:
                 tree_sizes = {exit_: len(initial_exit_to_newnodes[exit_]) for exit_ in initial_exit_to_newnodes}
                 max_tree_size = max(tree_sizes.values())
@@ -315,7 +326,6 @@ class RegionIdentifier(Analysis):
         return refined_loop_nodes, refined_exit_nodes
 
     def _remove_self_loop(self, graph: networkx.DiGraph):
-
         r = False
 
         while True:
@@ -331,7 +341,6 @@ class RegionIdentifier(Analysis):
         return r
 
     def _merge_single_entry_node(self, graph: networkx.DiGraph):
-
         r = False
 
         while True:
@@ -348,7 +357,6 @@ class RegionIdentifier(Analysis):
         return r
 
     def _make_regions(self, graph: networkx.DiGraph):
-
         structured_loop_headers = set()
         new_regions = []
 
@@ -418,7 +426,6 @@ class RegionIdentifier(Analysis):
     #
 
     def _make_cyclic_region(self, head, graph: networkx.DiGraph):
-
         l.debug("Found cyclic region at %#08x", head.addr)
         initial_loop_nodes = self._find_initial_loop_nodes(graph, head)
         l.debug("Initial loop nodes %s", self._dbg_block_list(initial_loop_nodes))
@@ -657,7 +664,10 @@ class RegionIdentifier(Analysis):
                     subgraph = networkx.DiGraph()
                     subgraph.add_node(node)
                     self._abstract_acyclic_region(
-                        graph, GraphRegion(node, subgraph, None, None, False, None), [], secondary_graph=secondary_graph
+                        graph,
+                        GraphRegion(node, subgraph, None, None, False, None, cyclic_ancestor=cyclic),
+                        [],
+                        secondary_graph=secondary_graph,
                     )
                 continue
 
@@ -668,7 +678,9 @@ class RegionIdentifier(Analysis):
                 if (node, postdom_node) not in failed_region_attempts:
                     if self._check_region(graph_copy, node, postdom_node, doms, df):
                         frontier = [postdom_node]
-                        region = self._compute_region(graph_copy, node, frontier, dummy_endnode=dummy_endnode)
+                        region = self._compute_region(
+                            graph_copy, node, frontier, dummy_endnode=dummy_endnode, cyclic_ancestor=cyclic
+                        )
                         if region is not None:
                             # update region.graph_with_successors
                             if secondary_graph is not None:
@@ -747,8 +759,7 @@ class RegionIdentifier(Analysis):
         return True
 
     @staticmethod
-    def _compute_region(graph, node, frontier, include_frontier=False, dummy_endnode=None):
-
+    def _compute_region(graph, node, frontier, include_frontier=False, dummy_endnode=None, cyclic_ancestor=False):
         subgraph = networkx.DiGraph()
         frontier_edges = []
         queue = [node]
@@ -796,14 +807,15 @@ class RegionIdentifier(Analysis):
                     subgraph_with_frontier.add_edge(src, dst, **edge_data)
             # assert dummy_endnode not in frontier
             # assert dummy_endnode not in subgraph_with_frontier
-            return GraphRegion(node, subgraph, frontier, subgraph_with_frontier, False, None)
+            return GraphRegion(
+                node, subgraph, frontier, subgraph_with_frontier, False, None, cyclic_ancestor=cyclic_ancestor
+            )
         else:
             return None
 
     def _abstract_acyclic_region(
         self, graph: networkx.DiGraph, region, frontier, dummy_endnode=None, secondary_graph=None
     ):
-
         in_edges = self._region_in_edges(graph, region, data=True)
         out_edges = self._region_out_edges(graph, region, data=True)
 
@@ -914,12 +926,10 @@ class RegionIdentifier(Analysis):
 
     @staticmethod
     def _region_in_edges(graph, region, data=False):
-
         return list(graph.in_edges(region.head, data=data))
 
     @staticmethod
     def _region_out_edges(graph, region, data=False):
-
         out_edges = []
         for node in region.graph.nodes():
             out_ = graph.out_edges(node, data=data)
@@ -930,9 +940,8 @@ class RegionIdentifier(Analysis):
         return out_edges
 
     def _remove_node(self, graph: networkx.DiGraph, node):  # pylint:disable=no-self-use
-
-        in_edges = [(src, dst, data) for (src, dst, data) in graph.in_edges(node, data=True) if not src is node]
-        out_edges = [(src, dst, data) for (src, dst, data) in graph.out_edges(node, data=True) if not dst is node]
+        in_edges = [(src, dst, data) for (src, dst, data) in graph.in_edges(node, data=True) if src is not node]
+        out_edges = [(src, dst, data) for (src, dst, data) in graph.out_edges(node, data=True) if dst is not node]
 
         if len(in_edges) <= 1 and len(out_edges) <= 1:
             # it forms a region by itself :-)
@@ -953,7 +962,6 @@ class RegionIdentifier(Analysis):
     def _merge_nodes(
         self, graph: networkx.DiGraph, node_a, node_b, force_multinode=False
     ):  # pylint:disable=no-self-use
-
         in_edges = list(graph.in_edges(node_a, data=True))
         out_edges = list(graph.out_edges(node_b, data=True))
 
@@ -980,13 +988,12 @@ class RegionIdentifier(Analysis):
                     dst = new_node
                 graph.add_edge(new_node, dst, **data)
 
-        assert not node_a in graph
-        assert not node_b in graph
+        assert node_a not in graph
+        assert node_b not in graph
 
     def _absorb_node(
         self, graph: networkx.DiGraph, node_mommy, node_kiddie, force_multinode=False
     ):  # pylint:disable=no-self-use
-
         in_edges_mommy = graph.in_edges(node_mommy, data=True)
         out_edges_mommy = graph.out_edges(node_mommy, data=True)
         out_edges_kiddie = graph.out_edges(node_kiddie, data=True)
@@ -1021,8 +1028,8 @@ class RegionIdentifier(Analysis):
                     dst = new_node
                 graph.add_edge(new_node, dst, **data)
 
-        assert not node_mommy in graph
-        assert not node_kiddie in graph
+        assert node_mommy not in graph
+        assert node_kiddie not in graph
 
     def _ensure_jump_at_loop_exit_ends(self, node: Union[Block, MultiNode]) -> None:
         if isinstance(node, Block):

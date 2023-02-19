@@ -1,7 +1,7 @@
 # pylint:disable=multiple-statements,line-too-long,consider-using-enumerate
-from typing import Dict, Set, Optional, Any, List, Union, Tuple, TYPE_CHECKING
+from typing import Dict, Set, Optional, Any, List, Union, Tuple, OrderedDict as ODict, TYPE_CHECKING
 import logging
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 
 import networkx
 
@@ -84,7 +84,6 @@ class DreamStructurer(StructurerBase):
         self._analyze()
 
     def _analyze(self):
-
         has_cycle = self._has_cycle()
         # sanity checks
         if self._region.cyclic:
@@ -107,7 +106,6 @@ class DreamStructurer(StructurerBase):
             self._analyze_acyclic()
 
     def _analyze_cyclic(self):
-
         loop_head = self._region.head
 
         loop_subgraph = self._region.graph
@@ -126,7 +124,6 @@ class DreamStructurer(StructurerBase):
         self.result = seq
 
     def _analyze_acyclic(self):
-
         # let's generate conditions first
         self.cond_proc.recover_reaching_conditions(
             self._region, with_successors=True, case_entry_to_switch_head=self._case_entry_to_switch_head
@@ -151,7 +148,6 @@ class DreamStructurer(StructurerBase):
         self.result = seq
 
     def _find_loop_nodes_and_successors(self):
-
         graph = self._region.graph
         head = self._region.head
 
@@ -214,7 +210,6 @@ class DreamStructurer(StructurerBase):
         return loop_subgraph, loop_successors
 
     def _make_endless_loop(self, loop_head, loop_subgraph, loop_successors):
-
         loop_body = self._to_loop_body_sequence(loop_head, loop_subgraph, loop_successors)
 
         # create a while(true) loop with sequence node being the loop body
@@ -223,7 +218,6 @@ class DreamStructurer(StructurerBase):
         return loop_node
 
     def _refine_loop(self, loop_node):
-
         while True:
             # while
             r, loop_node = self._refine_loop_while(loop_node)
@@ -242,7 +236,6 @@ class DreamStructurer(StructurerBase):
 
     @staticmethod
     def _refine_loop_while(loop_node):
-
         if loop_node.sort == "while" and loop_node.condition is None and loop_node.sequence_node.nodes:
             # it's an endless loop
             first_node = first_nonlabel_node(loop_node.sequence_node)
@@ -262,7 +255,6 @@ class DreamStructurer(StructurerBase):
 
     @staticmethod
     def _refine_loop_dowhile(loop_node):
-
         if loop_node.sort == "while" and loop_node.condition is None and loop_node.sequence_node.nodes:
             # it's an endless loop
             last_node = loop_node.sequence_node.nodes[-1]
@@ -277,7 +269,6 @@ class DreamStructurer(StructurerBase):
         return False, loop_node
 
     def _to_loop_body_sequence(self, loop_head, loop_subgraph, loop_successors):
-
         graph = self._region.graph_with_successors
         loop_region_graph = networkx.DiGraph()
 
@@ -351,7 +342,6 @@ class DreamStructurer(StructurerBase):
         return seq
 
     def _make_sequence(self):
-
         seq = SequenceNode(None)
 
         for node in CFGUtils.quasi_topological_sort_nodes(self._region.graph):
@@ -421,7 +411,6 @@ class DreamStructurer(StructurerBase):
         return seq
 
     def _structure_sequence(self, seq):
-
         self._make_switch_cases(seq)
 
         # this is hackish...
@@ -454,12 +443,11 @@ class DreamStructurer(StructurerBase):
             break
 
     def _merge_same_conditioned_nodes(self, seq):
-
         # search for nodes with the same reaching condition and then merge them into one sequence node
         i = 0
         while i < len(seq.nodes) - 1:
             node_0 = seq.nodes[i]
-            if not type(node_0) is CodeNode:
+            if type(node_0) is not CodeNode:
                 i += 1
                 continue
             rcond_0 = node_0.reaching_condition
@@ -467,7 +455,7 @@ class DreamStructurer(StructurerBase):
                 i += 1
                 continue
             node_1 = seq.nodes[i + 1]
-            if not type(node_1) is CodeNode:
+            if type(node_1) is not CodeNode:
                 i += 1
                 continue
             rcond_1 = node_1.reaching_condition
@@ -505,7 +493,6 @@ class DreamStructurer(StructurerBase):
 
         while True:
             for i in range(len(seq.nodes)):
-
                 node = seq.nodes[i]
 
                 # Jumptable_AddressLoadedFromMemory
@@ -535,7 +522,9 @@ class DreamStructurer(StructurerBase):
                     { Goto A<64> } else { Goto B<64> }
 
         A:     (with an indirect jump)
-               Goto((Conv(32->64, Load(addr=(0x40964c<64> + (Load(addr=stack_base-80, size=8, endness=Iend_LE) Mul 0x4<8>)), size=4, endness=Iend_LE)) + 0x40964c<64>))
+               Goto((
+                Conv(32->64, Load(addr=(0x40964c<64> + (Load(addr=stack_base-80, size=8, endness=Iend_LE) Mul 0x4<8>)),
+                size=4, endness=Iend_LE)) + 0x40964c<64>))
 
         B:     (the default case)
         """
@@ -665,9 +654,19 @@ class DreamStructurer(StructurerBase):
         return True
 
     def _make_switch_cases_core(
-        self, seq, i, node, cmp_expr, cases, node_default, addr, addr2nodes, to_remove, node_a=None, jumptable_addr=None
+        self,
+        seq,
+        i,
+        node,
+        cmp_expr,
+        cases: ODict,
+        node_default,
+        addr,
+        addr2nodes,
+        to_remove,
+        node_a=None,
+        jumptable_addr=None,
     ):
-
         scnode = SwitchCaseNode(cmp_expr, cases, node_default, addr=addr)
         scnode = CodeNode(scnode, node.reaching_condition)
 
@@ -908,7 +907,7 @@ class DreamStructurer(StructurerBase):
         head_node_idx: int,
         node_b_addr: int,
         addr2nodes: Dict[int, Set[CodeNode]],
-    ) -> Tuple[Dict, Any, Any]:
+    ) -> Tuple[ODict, Any, Any]:
         """
         Discover all cases for the switch-case structure and build the switch-cases dict.
 
@@ -921,7 +920,7 @@ class DreamStructurer(StructurerBase):
         :return:                    A tuple of (dict of cases, the default node if exists, nodes to remove).
         """
 
-        cases: Dict[Union[int, Tuple[int]], SequenceNode] = {}
+        cases: ODict[Union[int, Tuple[int, ...]], SequenceNode] = OrderedDict()
         to_remove = set()
         node_default = addr2nodes.get(node_b_addr, None)
         if node_default is not None:
@@ -1030,6 +1029,9 @@ class DreamStructurer(StructurerBase):
 
             self._new_sequences.append(converted_node)
 
+        # reorganize cases to handle fallthroughs
+        cases = self._reorganize_switch_cases(cases)
+
         return cases, node_default, to_remove
 
     #
@@ -1037,14 +1039,13 @@ class DreamStructurer(StructurerBase):
     #
 
     def _make_ites(self, seq):
-
         # search for a == ^a pairs
 
         while True:
             break_hard = False
             for i in range(len(seq.nodes)):
                 node_0 = seq.nodes[i]
-                if not type(node_0) is CodeNode:
+                if type(node_0) is not CodeNode:
                     continue
                 rcond_0 = node_0.reaching_condition
                 if rcond_0 is None:
@@ -1053,7 +1054,7 @@ class DreamStructurer(StructurerBase):
                     continue
                 for j in range(i + 1, len(seq.nodes)):
                     node_1 = seq.nodes[j]
-                    if not type(node_1) is CodeNode:
+                    if type(node_1) is not CodeNode:
                         continue
                     if node_0 is node_1:
                         continue
@@ -1072,7 +1073,6 @@ class DreamStructurer(StructurerBase):
                 break
 
     def _structure_common_subexpression_conditions(self, seq):
-
         # use common subexpressions to structure nodes and create more if-then-else instances
 
         i = 0
@@ -1110,7 +1110,6 @@ class DreamStructurer(StructurerBase):
 
     @staticmethod
     def _nodes_guarded_by_common_subexpr(seq, common_subexpr, starting_idx):
-
         candidates = []
 
         if common_subexpr is claripy.true:
@@ -1128,7 +1127,6 @@ class DreamStructurer(StructurerBase):
 
     @staticmethod
     def _create_seq_node_guarded_by_common_subexpr(common_subexpr, candidates):
-
         new_nodes = []
 
         for _, node, subexprs in candidates:
@@ -1162,7 +1160,6 @@ class DreamStructurer(StructurerBase):
                     node.reaching_condition = guarding_condition
 
     def _make_condition_nodes(self, seq):
-
         # make all conditionally-reachable nodes ConditionNodes
         for i in range(len(seq.nodes)):
             node = seq.nodes[i]
@@ -1188,7 +1185,6 @@ class DreamStructurer(StructurerBase):
         CascadingConditionTransformer(seq)
 
     def _make_ite(self, seq, node_0, node_1):
-
         # ensure order
         if node_0.addr > node_1.addr:
             node_0, node_1 = node_1, node_0

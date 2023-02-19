@@ -5,9 +5,7 @@ import string
 import itertools
 from collections import defaultdict
 from typing import Union, Optional, Iterable, Set, Generator
-from typing import (
-    Type,
-)  # For some reasons the linter doesn't recognize the use in apply_definition but PyCharm needs it imported to correctly recognize it # pylint: disable=unused-import
+from typing import Type
 
 from itanium_demangler import parse
 
@@ -180,7 +178,7 @@ class Function(Serializable):
         else:
             if self.project is None:
                 raise ValueError(
-                    "'syscall' must be specified if you do not specify a function manager for this new" " function."
+                    "'syscall' must be specified if you do not specify a function manager for this new function."
                 )
 
             # Determine whether this function is a syscall or not
@@ -192,8 +190,8 @@ class Function(Serializable):
         else:
             if self.project is None:
                 raise ValueError(
-                    "'is_simprocedure' must be specified if you do not specify a function manager for this"
-                    " new function."
+                    "'is_simprocedure' must be specified if you do not specify a function manager for this new "
+                    "function."
                 )
 
             if self.is_syscall or self.project.is_hooked(addr):
@@ -206,7 +204,7 @@ class Function(Serializable):
             # Whether this function is a PLT entry or not is fully relying on the PLT detection in CLE
             if self.project is None:
                 raise ValueError(
-                    "'is_plt' must be specified if you do not specify a function manager for this new" " function."
+                    "'is_plt' must be specified if you do not specify a function manager for this new function."
                 )
 
             self.is_plt = self.project.loader.find_plt_stub_name(addr) is not None
@@ -231,7 +229,7 @@ class Function(Serializable):
         else:
             if self.project is None:
                 raise ValueError(
-                    "'returning' must be specified if you do not specify a functio nmnager for this new" " function."
+                    "'returning' must be specified if you do not specify a function manager for this new function."
                 )
 
             self._returning = self._get_initial_returning()
@@ -750,12 +748,14 @@ class Function(Serializable):
     def _clear_transition_graph(self):
         self._block_cache = {}
         self._block_sizes = {}
+        self._addr_to_block_node = {}
+        self._local_blocks = {}
+        self._local_block_addrs = set()
         self.startpoint = None
         self.transition_graph = networkx.DiGraph()
         self._local_transition_graph = None
 
     def _confirm_fakeret(self, src, dst):
-
         if src not in self.transition_graph or dst not in self.transition_graph[src]:
             raise AngrValueError(f"FakeRet edge ({src}, {dst}) is not in transition graph.")
 
@@ -1511,7 +1511,6 @@ class Function(Serializable):
 
     @staticmethod
     def _addr_to_funcloc(addr):
-
         # FIXME
         if isinstance(addr, tuple):
             return addr[0]
@@ -1529,13 +1528,7 @@ class Function(Serializable):
                 return ast.__str__()
         return self.name
 
-    def apply_definition(self, definition, calling_convention=None):
-        """
-
-        :param str definition:
-        :param Optional[Union[SimCC, Type[SimCC]]] calling_convention:
-        :return None:
-        """
+    def apply_definition(self, definition: str, calling_convention: Optional[Union[SimCC, Type[SimCC]]] = None) -> None:
         if not definition.endswith(";"):
             definition += ";"
         func_def = parse_defns(definition, arch=self.project.arch)

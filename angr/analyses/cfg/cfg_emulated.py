@@ -200,12 +200,16 @@ class CFGEmulated(ForwardAnalysis, CFGBase):  # pylint: disable=abstract-method
                                                     jumpkind, or a SimState instance. Unsupported entries in starts will
                                                     lead to an AngrCFGError being raised.
         :param keep_state:                          Whether to keep the SimStates for each CFGNode.
-        :param resolve_indirect_jumps:              Whether to enable the indirect jump resolvers for resolving indirect jumps
-        :param enable_advanced_backward_slicing:    Whether to enable an intensive technique for resolving indirect jumps
-        :param enable_symbolic_back_traversal:      Whether to enable an intensive technique for resolving indirect jumps
-        :param list indirect_jump_resolvers:        A custom list of indirect jump resolvers. If this list is None or empty,
-                                                    default indirect jump resolvers specific to this architecture and binary
-                                                    types will be loaded.
+        :param resolve_indirect_jumps:              Whether to enable the indirect jump resolvers for resolving indirect
+                                                    jumps
+        :param enable_advanced_backward_slicing:    Whether to enable an intensive technique for resolving indirect
+                                                    jumps
+        :param enable_symbolic_back_traversal:      Whether to enable an intensive technique for resolving indirect
+                                                    jumps
+        :param list indirect_jump_resolvers:        A custom list of indirect jump resolvers. If this list is None or
+                                                    empty,
+                                                    default indirect jump resolvers specific to this architecture and
+                                                    binary types will be loaded.
         :param additional_edges:                    A dict mapping addresses of basic blocks to addresses of
                                                     successors to manually include and analyze forward from.
         :param bool no_construct:                   Skip the construction procedure. Only used in unit-testing.
@@ -1242,7 +1246,7 @@ class CFGEmulated(ForwardAnalysis, CFGBase):  # pylint: disable=abstract-method
 
             the_jobs = []
             if block_id in self._pending_jobs:
-                the_jobs: "Pendingjob" = self._pending_jobs.pop(block_id)
+                the_jobs: "PendingJob" = self._pending_jobs.pop(block_id)
                 for the_job in the_jobs:
                     self._deregister_analysis_job(the_job.caller_func_addr, the_job)
             else:
@@ -1966,7 +1970,6 @@ class CFGEmulated(ForwardAnalysis, CFGBase):  # pylint: disable=abstract-method
         se = state.solver
 
         if func is not None and sp_addr is not None:
-
             # Fix the stack pointer (for example, skip the return address on the stack)
             new_sp_addr = sp_addr + self.project.arch.call_sp_fix
 
@@ -2117,7 +2120,6 @@ class CFGEmulated(ForwardAnalysis, CFGBase):  # pylint: disable=abstract-method
             )
 
         if jumpkind.startswith("Ijk_Sys"):
-
             self.kb.functions._add_call_to(
                 function_addr=src_node.function_address,
                 from_node=src_node.to_codenode(),
@@ -2153,7 +2155,6 @@ class CFGEmulated(ForwardAnalysis, CFGBase):  # pylint: disable=abstract-method
             )
 
         elif jumpkind in ("Ijk_Boring", "Ijk_InvalICache"):
-
             src_obj = self.project.loader.find_object_containing(src_node.addr)
             dest_obj = self.project.loader.find_object_containing(dst_node.addr) if dst_node is not None else None
 
@@ -2356,7 +2357,6 @@ class CFGEmulated(ForwardAnalysis, CFGBase):  # pylint: disable=abstract-method
 
             # We need input states to perform backward slicing
             if self._advanced_backward_slicing and self._keep_state:
-
                 # Optimization: make sure we only try to resolve an indirect jump if any of the following criteria holds
                 # - It's a jump (Ijk_Boring), and its target is either fully symbolic, or its resolved target is within
                 #   the current binary
@@ -2377,8 +2377,8 @@ class CFGEmulated(ForwardAnalysis, CFGBase):  # pylint: disable=abstract-method
                         else:
                             concrete_target = legit_successor.solver.eval(legit_successor.ip)
                             if (
-                                not self.project.loader.find_object_containing(concrete_target)
-                                is self.project.loader.main_object
+                                self.project.loader.find_object_containing(concrete_target)
+                                is not self.project.loader.main_object
                             ):
                                 should_resolve = False
 
@@ -2850,7 +2850,7 @@ class CFGEmulated(ForwardAnalysis, CFGBase):  # pylint: disable=abstract-method
                     # Now let's live with this big hack...
                     try:
                         const = successor_state.solver.eval_one(data.ast)
-                    except:  # pylint: disable=bare-except
+                    except Exception:
                         continue
 
                     if self._is_address_executable(const):
@@ -2954,7 +2954,6 @@ class CFGEmulated(ForwardAnalysis, CFGBase):  # pylint: disable=abstract-method
                 )
 
         except (SimFastPathError, SimSolverModeError) as ex:
-
             if saved_state.mode == "fastpath":
                 # Got a SimFastPathError or SimSolverModeError in FastPath mode.
                 # We wanna switch to symbolic mode for current IRSB.
@@ -3116,7 +3115,7 @@ class CFGEmulated(ForwardAnalysis, CFGBase):  # pylint: disable=abstract-method
             # although the jumpkind is not Ijk_Call, it may still jump to a new function... let's see
             if self.project.is_hooked(exit_target):
                 hooker = self.project.hooked_by(exit_target)
-                if not hooker is procedures.stubs.UserHook.UserHook:
+                if hooker is not procedures.stubs.UserHook.UserHook:
                     # if it's not a UserHook, it must be a function
                     # Update the function address of the most recent call stack frame
                     new_call_stack = job.call_stack_copy()

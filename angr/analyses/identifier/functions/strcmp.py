@@ -26,8 +26,7 @@ class strcmp(Func):
 
     def gen_input_output_pair(self):
         l = 5
-        s = rand_str(l, strcmp.non_null)
-        # pylint disable=unused-variable
+        rand_str(l, strcmp.non_null)  # s
 
         return None
 
@@ -43,7 +42,6 @@ class strcmp(Func):
 
     @staticmethod
     def _strcmp_pretest(func, runner):
-
         # todo we don't test which order it returns the signs in
         bufa = "asdf\x00"
         bufb = "asdf\x00"

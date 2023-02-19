@@ -99,7 +99,6 @@ class SimJavaVM(SimOS):
     #
 
     def state_blank(self, addr=None, **kwargs):  # pylint: disable=arguments-differ
-
         if not kwargs.get("mode", None):
             kwargs["mode"] = self.project._default_analysis_mode
         if not kwargs.get("arch", None):
@@ -145,7 +144,7 @@ class SimJavaVM(SimOS):
 
         if not self.project.entry and not addr:
             raise ValueError(
-                "Failed to init blank state. Project entry is not set/invalid " "and no address was provided."
+                "Failed to init blank state. Project entry is not set/invalid and no address was provided."
             )
 
         # init state register
@@ -317,9 +316,6 @@ class SimJavaVM(SimOS):
             return SimSootValue_StringRef.new_string(state, StringS(f"default_value_{type_}", 1000))
         if type_.endswith("[][]"):
             raise NotImplementedError
-            # multiarray = SimSootExpr_NewMultiArray.new_array(self.state, element_type, size)
-            # multiarray.add_default_value_generator(lambda s: SimSootExpr_NewMultiArray._generate_inner_array(s, element_type, sizes))
-            # return  multiarray
         if type_.endswith("[]"):
             array = SimSootExpr_NewArray.new_array(state, type_[:-2], BVV(2, 32))
             return array
@@ -351,7 +347,7 @@ class SimJavaVM(SimOS):
         if to_type in ["float", "double"]:
             if value.symbolic:
                 # TODO extend support for floating point types
-                l.warning("No support for symbolic floating-point arguments." "Value gets concretized.")
+                l.warning("No support for symbolic floating-point arguments. Value gets concretized.")
             value = float(state.solver.eval(value))
             sort = FSORT_FLOAT if to_type == "float" else FSORT_DOUBLE
             return FPV(value, sort)
@@ -426,8 +422,8 @@ class SimJavaVM(SimOS):
                 return symbol.rebased_addr
 
         native_symbols = "\n".join(self.native_symbols.keys())
-        l.warning("No native method found that matches the Soot method '%s'. " "Skipping statement.", soot_method.name)
-        l.debug("Available symbols (prefix + encoded class path + encoded method " "name):\n%s", native_symbols)
+        l.warning("No native method found that matches the Soot method '%s'. Skipping statement.", soot_method.name)
+        l.debug("Available symbols (prefix + encoded class path + encoded method name):\n%s", native_symbols)
         return None
 
     def get_native_type(self, java_type):

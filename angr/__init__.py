@@ -1,7 +1,7 @@
 # pylint: disable=wildcard-import
 # pylint: disable=wrong-import-position
 
-__version__ = "9.2.37.dev0"
+__version__ = "9.2.39.dev0"
 
 if bytes is str:
     raise Exception(
@@ -68,7 +68,6 @@ from . import analyses
 from . import knowledge_plugins
 from . import exploration_techniques
 from .exploration_techniques import ExplorationTechnique
-from . import type_backend
 from . import sim_type as types
 from .state_hierarchy import StateHierarchy
 

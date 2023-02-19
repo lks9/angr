@@ -1,4 +1,4 @@
-from ailment.expression import Convert, BinaryOp, Const
+from ailment.expression import BinaryOp, Const
 
 from .base import PeepholeOptimizationExprBase
 
@@ -10,7 +10,6 @@ class AShlConstSubA(PeepholeOptimizationExprBase):
     expr_classes = (BinaryOp,)
 
     def optimize(self, expr: BinaryOp):
-
         if (
             expr.op == "Sub"
             and len(expr.operands) == 2

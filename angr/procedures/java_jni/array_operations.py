@@ -17,7 +17,6 @@ l = logging.getLogger("angr.procedures.java_jni.array_operations")
 
 
 class GetArrayLength(JNISimProcedure):
-
     return_ty = "int"
 
     def run(self, ptr_env, array_):
@@ -31,7 +30,6 @@ class GetArrayLength(JNISimProcedure):
 
 
 class NewArray(JNISimProcedure):
-
     element_type: Optional[str] = None
     return_ty = "reference"
 
@@ -71,11 +69,9 @@ class NewLongArray(NewArray):
 
 
 class NewObjectArray(JNISimProcedure):
-
     return_ty = "reference"
 
     def run(self, ptr_env, length_, element_type_, initial_element_):
-
         length = self._normalize_array_idx(length_)
         element_type = self.state.jni_references.lookup(element_type_)
 
@@ -85,7 +81,10 @@ class NewObjectArray(JNISimProcedure):
         # if available, set the initial_element as the arrays default value
         if self.state.solver.eval(initial_element_ != 0):
             initial_element = self.state.jni_references.lookup(initial_element_)
-            generator = lambda state: initial_element
+
+            def generator(state):
+                return initial_element
+
             array.add_default_value_generator(generator)
         else:
             initial_element = None
@@ -100,11 +99,9 @@ class NewObjectArray(JNISimProcedure):
 
 
 class GetObjectArrayElement(JNISimProcedure):
-
     return_ty = "reference"
 
     def run(self, ptr_env, array_, idx_):
-
         idx = self._normalize_array_idx(idx_)
         array = self.state.jni_references.lookup(array_)
 
@@ -115,7 +112,7 @@ class GetObjectArrayElement(JNISimProcedure):
         if self.state.solver.symbolic(idx):
             idx = self.state.eval(idx)
             l.warning(
-                "Symbolic indices are not supported for object arrays %s. " "Index gets concretized to %s", array, idx
+                "Symbolic indices are not supported for object arrays %s. Index gets concretized to %s", array, idx
             )
 
         # load element and return reference to it
@@ -124,11 +121,9 @@ class GetObjectArrayElement(JNISimProcedure):
 
 
 class SetObjectArrayElement(JNISimProcedure):
-
     return_ty = "reference"
 
     def run(self, ptr_env, array_, idx_, value_):
-
         idx = self._normalize_array_idx(idx_)
         array = self.state.jni_references.lookup(array_)
         value = self.state.jni_references.lookup(value_)
@@ -140,7 +135,7 @@ class SetObjectArrayElement(JNISimProcedure):
         if self.state.solver.symbolic(idx):
             idx = self.state.eval(idx)
             l.warning(
-                "Symbolic indices are not supported for object arrays %s. " "Index gets concretized to %s", array, idx
+                "Symbolic indices are not supported for object arrays %s. Index gets concretized to %s", array, idx
             )
 
         self.state.javavm_memory.store_array_element(array, idx, value)
@@ -152,11 +147,9 @@ class SetObjectArrayElement(JNISimProcedure):
 
 
 class GetArrayElements(JNISimProcedure):
-
     return_ty = "reference"
 
     def run(self, ptr_env, array_, ptr_isCopy):
-
         array = self.state.jni_references.lookup(array_)
 
         # load array elements from java memory
@@ -176,17 +169,15 @@ class GetArrayElements(JNISimProcedure):
 
 
 class ReleaseArrayElements(JNISimProcedure):
-
     return_ty = "void"
 
     JNI_COMMIT = 1
     JNI_ABORT = 2
 
     def run(self, ptr_env, array_, ptr_elems, mode_):
-
         if self.state.solver.symbolic(mode_):
             l.warning(
-                "Symbolic mode %s in JNI function ReleaseArrayElements" "is not supported and gets concretized.", mode_
+                "Symbolic mode %s in JNI function ReleaseArrayElements is not supported and gets concretized.", mode_
             )
         mode = self.state.solver.min(mode_)  # avoid JNI_ABORT by taking the minimum
 
@@ -212,11 +203,9 @@ class ReleaseArrayElements(JNISimProcedure):
 
 
 class GetArrayRegion(JNISimProcedure):
-
     return_ty = "void"
 
     def run(self, ptr_env, array_, start_idx_, length_, ptr_buf):
-
         array = self.state.jni_references.lookup(array_)
         start_idx = self._normalize_array_idx(start_idx_)
         length = self._normalize_array_idx(length_)
@@ -241,7 +230,7 @@ class GetArrayRegion(JNISimProcedure):
         if state.solver.symbolic(length):
             midpoint_length = (state.solver.min(length) + state.solver.max(length)) // 2
             state.solver.add(length == midpoint_length)
-            l.warning("Symbolic lengths are currently not supported. " "Length is concretized to a midpoint value.")
+            l.warning("Symbolic lengths are currently not supported. Length is concretized to a midpoint value.")
         return state.solver.eval_one(length)
 
     @staticmethod
@@ -264,15 +253,14 @@ class GetArrayRegion(JNISimProcedure):
         #    True and False at the same time
         range_stays_within_bounds = state.solver.eval_upto(range_constraints, 2)
 
-        if not True in range_stays_within_bounds:
+        if True not in range_stays_within_bounds:
             # There is no valid combination of start_idx and length, s.t. the
             # range stays within the array bounds.
             # Correct simulation must continue with a raised Exception
             # TODO raise java.lang.ArrayIndexOutOfBoundsException
             #      For now, we just skip this SimProcedure.
             l.error(
-                "Skipping SimProcedure: "
-                "Every combination of start_idx %s and length %s is invalid (array length %s).",
+                "Skipping SimProcedure: Every combination of start_idx %s and length %s is invalid (array length %s).",
                 start_idx,
                 length,
                 array.size,
@@ -299,11 +287,9 @@ class GetArrayRegion(JNISimProcedure):
 
 
 class SetArrayRegion(JNISimProcedure):
-
     return_ty = "void"
 
     def run(self, ptr_env, array_, start_idx_, length_, ptr_buf):
-
         array = self.state.jni_references.lookup(array_)
         start_idx = self._normalize_array_idx(start_idx_)
         length = self._normalize_array_idx(length_)

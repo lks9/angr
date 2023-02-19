@@ -2,15 +2,13 @@ import claripy
 import logging
 
 from ..java import JavaSimProcedure
-from ...engines.soot.expressions import SimSootExpr_NewArray, SimSootExpr_NullConstant
-from ...engines.soot.values import SimSootValue_StringRef, SimSootValue_ThisRef
+from ...engines.soot.values import SimSootValue_ThisRef
 from .collection import ELEMS, SIZE, INDEX
 
 log = logging.getLogger(name=__name__)
 
 
 class IteratorHasNext(JavaSimProcedure):
-
     __provides__ = (("java.util.Iterator", "hasNext()"),)
 
     def run(self, this_ref):
@@ -28,7 +26,6 @@ class IteratorHasNext(JavaSimProcedure):
 
 
 class IteratorNext(JavaSimProcedure):
-
     __provides__ = (("java.util.Iterator", "next()"),)
 
     def run(self, this_ref):

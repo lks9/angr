@@ -34,8 +34,8 @@ class AST:
         return type(other) is AST and other.op == self.op and other.operands == self.operands
 
     def __repr__(self):
-
-        _short_repr = lambda a: a.short_repr
+        def _short_repr(a):
+            return a.short_repr
 
         if len(self.operands) == 1:
             return f"{self.op}{_short_repr(self.operands[0])}"
@@ -265,7 +265,6 @@ class LiveDefinitions:
         live_def_locs = set()
 
         if isinstance(variable, SimRegisterVariable):
-
             if variable.reg is None:
                 l.warning("lookup_defs: Got a None for a SimRegisterVariable. Consider fixing.")
                 return live_def_locs
@@ -481,7 +480,8 @@ class DDG(Analysis):
     def __init__(self, cfg, start=None, call_depth=None, block_addrs=None):
         """
         :param cfg:         Control flow graph. Please make sure each node has an associated `state` with it, e.g. by
-                            passing the keep_state=True and state_add_options=angr.options.refs arguments to CFGEmulated.
+                            passing the keep_state=True and state_add_options=angr.options.refs arguments to
+                            CFGEmulated.
         :param start:       An address, Specifies where we start the generation of this data dependence graph.
         :param call_depth:  None or integers. A non-negative integer specifies how deep we would like to track in the
                             call tree. None disables call_depth limit.
@@ -564,7 +564,6 @@ class DDG(Analysis):
 
     @property
     def ast_graph(self):
-
         return self._ast_graph
 
     #
@@ -792,7 +791,6 @@ class DDG(Analysis):
                     add_state_to_sucs = successing_nodes
 
                 for successing_node in add_state_to_sucs:
-
                     if (state.history.jumpkind == "Ijk_Call" or state.history.jumpkind.startswith("Ijk_Sys")) and (
                         state.ip.symbolic or successing_node.addr != state.solver.eval(state.ip)
                     ):
@@ -1051,7 +1049,6 @@ class DDG(Analysis):
                     self._data_graph_add_edge(self._temp_variables[tmp], prog_var, type="mem_data")
 
     def _handle_mem_read(self, action, code_location, state, statement):  # pylint:disable=unused-argument
-
         addrs = self._get_actual_addrs(action, state)
 
         for addr in addrs:
@@ -1083,7 +1080,6 @@ class DDG(Analysis):
                 self._variables_per_statement.append(var)
 
     def _handle_mem_write(self, action, location, state, statement):
-
         addrs = self._get_actual_addrs(action, state)
 
         for addr in addrs:
@@ -1114,7 +1110,6 @@ class DDG(Analysis):
                     self._ast_graph.add_edge(ProgramVariable(SimConstantVariable(const), location), pv)
 
     def _handle_reg_read(self, action, location, state, statement):  # pylint:disable=unused-argument
-
         reg_offset = action.offset
         variable = SimRegisterVariable(reg_offset, action.data.ast.size() // 8)
 
@@ -1144,7 +1139,6 @@ class DDG(Analysis):
             self._custom_data_per_statement = ("bp", 0)
 
     def _handle_reg_write(self, action, location, state, statement):  # pylint:disable=unused-argument
-
         reg_offset = action.offset
         variable = SimRegisterVariable(reg_offset, action.data.ast.size() // 8)
 
@@ -1173,7 +1167,6 @@ class DDG(Analysis):
                 self._data_graph_add_edge(self._temp_variables[tmp], pv)
 
     def _handle_tmp_read(self, action, location, state, statement):  # pylint:disable=unused-argument
-
         tmp = action.tmp
         tmp_var = self._temp_variables[tmp]
 
@@ -1190,7 +1183,6 @@ class DDG(Analysis):
         self._variables_per_statement.append(tmp_var)
 
     def _handle_tmp_write(self, action, location, state, statement):  # pylint:disable=unused-argument
-
         ast = None
 
         tmp = action.tmp
@@ -1247,7 +1239,6 @@ class DDG(Analysis):
             self._data_graph_add_edge(const_pv, pv)
 
     def _handle_exit(self, action, location, state, statement):  # pylint:disable=unused-argument
-
         # exits should only depend on tmps
         for tmp in action.tmp_deps:
             prev_code_loc = self._temp_variables[tmp].location
@@ -1260,7 +1251,6 @@ class DDG(Analysis):
             self._temp_edges[tmp].append(edge_tuple)
 
     def _handle_operation(self, action, location, state, statement):  # pylint:disable=unused-argument
-
         if action.op.endswith("Sub32") or action.op.endswith("Sub64"):
             # subtract
             expr_0, expr_1 = action.exprs
@@ -1296,7 +1286,6 @@ class DDG(Analysis):
                     self._custom_data_per_statement = (sort, offset)
 
     def _process_operation(self, action, location, state, statement):  # pylint:disable=unused-argument
-
         if action.op.endswith("Sub32") or action.op.endswith("Sub64"):
             # subtract
             expr_0, expr_1 = action.exprs
@@ -1390,7 +1379,6 @@ class DDG(Analysis):
         graph = self.graph
 
         for src, dst in edges_to_annotate:
-
             if src not in graph:
                 continue
             if dst not in graph[src]:
@@ -1524,7 +1512,7 @@ class DDG(Analysis):
 
             if dst.block_addr in block_addr_to_func:
                 dst_target_func = block_addr_to_func[dst.block_addr]
-                if not dst_target_func is src_target_func:
+                if dst_target_func is not src_target_func:
                     self._function_data_dependencies[dst_target_func].add_edge(src, dst, **data)
 
     #

@@ -44,7 +44,6 @@ class FormatString:
         return string.concat(c)
 
     def _get_str_at(self, str_addr, max_length=None):
-
         if max_length is None:
             strlen = self.parser._sim_strlen(str_addr)
 
@@ -59,7 +58,8 @@ class FormatString:
 
     def replace(self, va_arg):
         """
-        Implement printf - based on the stored format specifier information, format the values from the arg getter function `args` into a string.
+        Implement printf - based on the stored format specifier information, format the values from the arg getter
+        function `args` into a string.
 
         :param va_arg:          A function which takes a type and returns the next argument of that type
         :return:                The result formatted string
@@ -282,7 +282,6 @@ class FormatString:
                     position += length
 
                 else:
-
                     # XXX: atoi only supports strings of one byte
                     if fmt_spec.spec_type in [b"d", b"i", b"u", b"x"]:
                         base = 16 if fmt_spec.spec_type == b"x" else 10

@@ -955,7 +955,6 @@ class SimIROp:
             return claripy.fpToUBV(rm, arg, to_size)
 
     def _op_fgeneric_Cmp(self, args):  # pylint:disable=no-self-use
-
         # see https://github.com/angr/vex/blob/master/pub/libvex_ir.h#L580
         a, b = args[0].raw_to_fp(), args[1].raw_to_fp()
         return claripy.ite_cases(
@@ -1001,7 +1000,8 @@ class SimIROp:
             for lane_args in self.vector_args(args):
                 if self._float:
                     # HACK HACK HACK
-                    # this is such a weird divergence. why do the fp generics take several args and the int generics take a list?
+                    # this is such a weird divergence. why do the fp generics take several args and the int generics
+                    # take a list?
                     result.append(f(*lane_args).raw_to_bv())
                 else:
                     result.append(f(lane_args))

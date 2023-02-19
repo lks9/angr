@@ -499,7 +499,6 @@ class SimTypeChar(SimTypeReg):
 
 
 class SimTypeBool(SimTypeChar):
-
     _base_name = "bool"
 
     def __repr__(self):
@@ -1259,7 +1258,7 @@ class SimStructValue:
                 if isinstance(f, NamedTypeMixin) and f.name is None:
                     try:
                         return f[k]
-                    except:
+                    except KeyError:
                         continue
             else:
                 return self._values[k]
@@ -1493,7 +1492,7 @@ class SimCppClassValue:
                 if isinstance(f, NamedTypeMixin) and f.name is None:
                     try:
                         return f[k]
-                    except:
+                    except KeyError:
                         continue
             else:
                 return self._values[k]

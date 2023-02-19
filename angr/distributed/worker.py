@@ -24,7 +24,6 @@ class BadStatesDropper(ExplorationTechnique):
         self.db = db
 
     def step(self, simgr, stash="active", **kwargs):
-
         for k in ("deadended", "avoid", "pruned", "unsat", "errored"):
             if k in simgr.stashes and simgr.stashes[k]:
                 _l.debug("Storing states in stash %s.", k)
@@ -174,7 +173,6 @@ class Worker:
         return state.history.depth
 
     def _pickle_state(self, state):
-        # state.project = None  # this way we lose all changes the state makes after running... e.g., make_continuation()
         pass
 
     def _post_pickle_state(self, state, prio, sid):

@@ -84,7 +84,6 @@ class VFGJob(CFGJobBase):
 
 
 class PendingJob:
-
     __slots__ = (
         "block_id",
         "state",
@@ -182,18 +181,15 @@ class CallAnalysis(AnalysisTask):
     #
 
     def register_function_analysis(self, task):
-
         assert isinstance(task, FunctionAnalysis)
 
         self.function_analysis_tasks.append(task)
         task.call_analysis = self
 
     def add_final_job(self, job):
-
         self._final_jobs.append(job)
 
     def merge_jobs(self):
-
         assert self._final_jobs
 
         job = self._final_jobs[0]
@@ -509,7 +505,7 @@ class VFG(ForwardAnalysis, Analysis):  # pylint:disable=abstract-method
 
         if not self._cfg.normalized:
             l.warning(
-                "The given CFG is not normalized, which might impact the performance/accuracy of the VFG " "analysis."
+                "The given CFG is not normalized, which might impact the performance/accuracy of the VFG analysis."
             )
 
         # Prepare the state
@@ -972,7 +968,6 @@ class VFG(ForwardAnalysis, Analysis):  # pylint:disable=abstract-method
         return new_jobs
 
     def _post_job_handling(self, job: VFGJob, new_jobs, successors):  # pylint:disable=unused-argument
-
         # Debugging output
         if l.level == logging.DEBUG:
             self._post_job_handling_debug(job, successors)
@@ -1028,7 +1023,6 @@ class VFG(ForwardAnalysis, Analysis):  # pylint:disable=abstract-method
         pass
 
     def _merge_jobs(self, *jobs):
-
         l.debug("Merging jobs %s", jobs)
 
         # there should not be more than two jobs being merged at the same time
@@ -1079,7 +1073,7 @@ class VFG(ForwardAnalysis, Analysis):  # pylint:disable=abstract-method
 
         addr = job_0.addr
 
-        if not addr in self._widening_points(job_0.func_addr):
+        if addr not in self._widening_points(job_0.func_addr):
             return False
 
         tracing_times = self._tracing_times[job_0.block_id]
@@ -1107,8 +1101,6 @@ class VFG(ForwardAnalysis, Analysis):  # pylint:disable=abstract-method
         l.debug("Widening %s", job_1)
 
         new_state, _ = self._widen_states(job_0.state, job_1.state)
-        # print "job_0.state.eax =", job_0.state.regs.eax._model_vsa, "job_1.state.eax =", job_1.state.regs.eax._model_vsa
-        # print "new_job.state.eax =", new_state.regs.eax._model_vsa
 
         new_job = VFGJob(
             jobs[0].addr,
@@ -1126,7 +1118,6 @@ class VFG(ForwardAnalysis, Analysis):  # pylint:disable=abstract-method
         return new_job
 
     def _job_queue_empty(self):
-
         if self._pending_returns:
             # We don't have any paths remaining. Let's pop a previously-missing return to
             # process
@@ -1142,7 +1133,7 @@ class VFG(ForwardAnalysis, Analysis):  # pylint:disable=abstract-method
                 l.debug("No pending return for the current function %#x. Unwind the stack.", func_addr)
                 if not self._top_function_analysis_task.done:
                     l.warning(
-                        "The top function analysis task is not done yet. This might be a bug. " "Please report to Fish."
+                        "The top function analysis task is not done yet. This might be a bug. Please report to Fish."
                     )
                 # stack unwinding
                 while True:
@@ -1497,10 +1488,11 @@ class VFG(ForwardAnalysis, Analysis):  # pylint:disable=abstract-method
                 successor_state.registers.store(arch.ret_offset, top_si)
 
             if job.call_skipped:
-
                 # TODO: Make sure the return values make sense
-                # if self.project.arch.name == 'X86':
-                #    successor_state.regs.eax = successor_state.solver.BVS('ret_val', 32, min=0, max=0xffffffff, stride=1)
+                # if self.project.arch.name == "X86":
+                #     successor_state.regs.eax = successor_state.solver.BVS(
+                #         "ret_val", 32, min=0, max=0xFFFFFFFF, stride=1
+                #     )
 
                 new_job = VFGJob(
                     successor_addr,
@@ -1542,10 +1534,10 @@ class VFG(ForwardAnalysis, Analysis):  # pylint:disable=abstract-method
 
                     if isinstance(reg_sp_expr._model_vsa, claripy.vsa.StridedInterval):
                         reg_sp_si = reg_sp_expr._model_vsa
-                        reg_sp_val = reg_sp_si.min
+                        reg_sp_si.min  # reg_sp_val
                     elif isinstance(reg_sp_expr._model_vsa, claripy.vsa.ValueSet):
                         reg_sp_si = next(iter(reg_sp_expr._model_vsa.items()))[1]
-                        reg_sp_val = reg_sp_si.min
+                        reg_sp_si.min  # reg_sp_val
                         # TODO: Finish it!
 
             new_job = VFGJob(
@@ -1775,7 +1767,6 @@ class VFG(ForwardAnalysis, Analysis):  # pylint:disable=abstract-method
             self._function_final_states[function_address][function_key] = state
 
     def _trace_pending_job(self, job_key):
-
         pending_job: PendingJob = self._pending_returns.pop(job_key)
         addr = job_key.addr
 
@@ -1798,7 +1789,6 @@ class VFG(ForwardAnalysis, Analysis):  # pylint:disable=abstract-method
         self._top_task.jobs.append(job)
 
     def _get_pending_job(self, func_addr):
-
         pending_ret_key = None
         k: BlockID
         for k in self._pending_returns.keys():

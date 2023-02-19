@@ -82,7 +82,8 @@ class Project:
     :ivar analyses:     The available analyses.
     :type analyses:     angr.analysis.Analyses
     :ivar entry:        The program entrypoint.
-    :ivar factory:      Provides access to important analysis elements such as path groups and symbolic execution results.
+    :ivar factory:      Provides access to important analysis elements such as path groups and symbolic execution
+                        results.
     :type factory:      AngrObjectFactory
     :ivar filename:     The filename of the executable.
     :ivar loader:       The program loader.
@@ -116,7 +117,6 @@ class Project:
         eager_ifunc_resolution=None,
         **kwargs,
     ):
-
         # Step 1: Load the binary
 
         if load_options is None:
@@ -173,7 +173,6 @@ class Project:
         # It doesn't make any sense to have auto_load_libs
         # if you have the concrete target, let's warn the user about this.
         if self.concrete_target and load_options.get("auto_load_libs", None):
-
             l.critical(
                 "Incompatible options selected for this project, please disable auto_load_libs if "
                 "you want to use a concrete target."
@@ -646,7 +645,6 @@ class Project:
         """
         new_sim_procedures = {}
         for key_address, simproc_obj in self._sim_procedures.items():
-
             # if we don't want stubs during the sync let's skip those, we will execute the real function.
             if not stubs_on_sync and simproc_obj.is_stub:
                 continue

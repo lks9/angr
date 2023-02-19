@@ -137,7 +137,7 @@ class ReachingDefinitionsAnalysis(
         self._observe_callback = observe_callback
 
         # sanity check
-        if self._observation_points and any(not type(op) is tuple for op in self._observation_points):
+        if self._observation_points and any(type(op) is not tuple for op in self._observation_points):
             raise ValueError('"observation_points" must be tuples.')
 
         self._node_iterations: DefaultDict[int, int] = defaultdict(int)
@@ -201,7 +201,6 @@ class ReachingDefinitionsAnalysis(
 
     @property
     def one_result(self):
-
         if not self.observed_results:
             raise ValueError("No result is available.")
         if len(self.observed_results) != 1:

@@ -10,7 +10,7 @@ from ailment.expression import BinaryOp, Const, Register, Load
 from ...cfg.cfg_utils import CFGUtils
 from ..utils import first_nonlabel_statement, remove_last_statement
 from ..structuring.structurer_nodes import IncompleteSwitchCaseHeadStatement, SequenceNode, MultiNode
-from .optimization_pass import OptimizationPass, OptimizationPassStage
+from .optimization_pass import OptimizationPass, OptimizationPassStage, MultipleBlocksException
 
 if TYPE_CHECKING:
     from ....sim_variable import SimVariable
@@ -74,12 +74,10 @@ class LoweredSwitchSimplifier(OptimizationPass):
         self.analyze()
 
     def _check(self):
-
         # TODO: More filtering
         return True, None
 
     def _analyze(self, cache=None):
-
         variable_to_cases = self._find_cascading_switch_variable_comparisons()
 
         if not variable_to_cases:
@@ -131,7 +129,6 @@ class LoweredSwitchSimplifier(OptimizationPass):
         variable_to_cases = {}
 
         for head in variable_comparisons:
-
             cases = []
             last_comp = None
             comp = head
@@ -157,11 +154,22 @@ class LoweredSwitchSimplifier(OptimizationPass):
                     if self._graph.in_degree[comp] > 1:
                         break
 
-                successors = list(self._graph.successors(comp))
+                successors = [succ for succ in self._graph.successors(comp) if succ is not comp]
                 succ_addrs = {succ.addr for succ in successors}
                 if target in succ_addrs:
-                    next_comp_addr = next(iter(succ_addr for succ_addr in succ_addrs if succ_addr != target))
-                    next_comp = self._get_block(next_comp_addr)
+                    next_comp_addr = next(iter(succ_addr for succ_addr in succ_addrs if succ_addr != target), None)
+                    if next_comp_addr is None:
+                        break
+                    try:
+                        next_comp = self._get_block(next_comp_addr)
+                    except MultipleBlocksException:
+                        # multiple blocks :/ it's possible that other optimization passes have duplicated the default
+                        # node. check it.
+                        next_comp_many = list(self._get_blocks(next_comp_addr))
+                        if next_comp_many[0] not in variable_comparisons:
+                            cases.append(Case(comp, None, variable, expr, "default", next_comp_addr, None))
+                        # otherwise we don't support it
+                        break
                     assert next_comp is not None
                     if next_comp in variable_comparisons:
                         last_comp = comp
@@ -211,7 +219,6 @@ class LoweredSwitchSimplifier(OptimizationPass):
     def _find_switch_variable_comparison_type_a(
         node,
     ) -> Optional[Tuple["SimVariable", Union[Register, Load], int, int, int]]:
-
         # the type a is the last statement is a var == constant comparison, but
         # there is more than one non-label statement in the block
 
@@ -248,7 +255,6 @@ class LoweredSwitchSimplifier(OptimizationPass):
     def _find_switch_variable_comparison_type_b(
         node,
     ) -> Optional[Tuple["SimVariable", Union[Register, Load], int, int, int]]:
-
         # the type b is the last statement is a var == constant comparison, and
         # there is only one non-label statement
 

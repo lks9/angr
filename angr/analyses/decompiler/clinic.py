@@ -93,6 +93,8 @@ class Clinic(Analysis):
         self.reaching_definitions: Optional[ReachingDefinitionsAnalysis] = None
         self._cache = cache
 
+        self._new_block_addrs = set()
+
         # sanity checks
         if not self.kb.functions:
             l.warning("No function is available in kb.functions. It will lead to a suboptimal conversion result.")
@@ -141,7 +143,6 @@ class Clinic(Analysis):
     #
 
     def _analyze(self):
-
         is_pcode_arch = ":" in self.project.arch.name
 
         # Set up the function graph according to configurations
@@ -489,7 +490,7 @@ class Clinic(Analysis):
         :rtype:             ailment.Block
         """
 
-        if not type(block_node) is BlockNode:
+        if type(block_node) is not BlockNode:
             return block_node
 
         block = self.project.factory.block(block_node.addr, block_node.size)
@@ -584,7 +585,7 @@ class Clinic(Analysis):
                             block.statements[-1] = call_stmt
 
                             ret_stmt = ailment.Stmt.Return(None, None, [], **last_stmt.tags)
-                            ret_block = ailment.Block(last_stmt.ins_addr, 1, statements=[ret_stmt])
+                            ret_block = ailment.Block(self.new_block_addr(), 1, statements=[ret_stmt])
                             ail_graph.add_edge(block, ret_block)
                         else:
                             stmt = ailment.Stmt.Call(None, target, **last_stmt.tags)
@@ -745,7 +746,6 @@ class Clinic(Analysis):
         variable_kb=None,
         **kwargs,
     ):
-
         addr_and_idx_to_blocks: Dict[Tuple[int, Optional[int]], ailment.Block] = {}
         addr_to_blocks: Dict[int, Set[ailment.Block]] = defaultdict(set)
 
@@ -758,7 +758,6 @@ class Clinic(Analysis):
 
         # Run each pass
         for pass_ in self._optimization_passes:
-
             if pass_.STAGE != stage:
                 continue
 
@@ -948,7 +947,6 @@ class Clinic(Analysis):
 
     @timethis
     def _recover_and_link_variables(self, ail_graph, arg_list):
-
         # variable recovery
         tmp_kb = KnowledgeBase(self.project) if self.variable_kb is None else self.variable_kb
         vr = self.project.analyses.VariableRecoveryFast(
@@ -1219,7 +1217,6 @@ class Clinic(Analysis):
             self._link_variables_on_call(variable_manager, global_variables, block, stmt_idx, expr, is_expr=True)
 
     def _function_graph_to_ail_graph(self, func_graph, blocks_by_addr_and_size=None):
-
         if blocks_by_addr_and_size is None:
             blocks_by_addr_and_size = self._blocks_by_addr_and_size
 
@@ -1244,6 +1241,24 @@ class Clinic(Analysis):
 
     @staticmethod
     def _remove_redundant_jump_blocks(ail_graph):
+        def first_conditional_jump(block: ailment.Block) -> Optional[ailment.Stmt.ConditionalJump]:
+            for stmt in block.statements:
+                if isinstance(stmt, ailment.Stmt.ConditionalJump):
+                    return stmt
+            return None
+
+        def patch_conditional_jump_target(cond_jump_stmt: ailment.Stmt.ConditionalJump, old_addr: int, new_addr: int):
+            if (
+                isinstance(cond_jump_stmt.true_target, ailment.Expr.Const)
+                and cond_jump_stmt.true_target.value == old_addr
+            ):
+                cond_jump_stmt.true_target.value = new_addr
+            if (
+                isinstance(cond_jump_stmt.false_target, ailment.Expr.Const)
+                and cond_jump_stmt.false_target.value == old_addr
+            ):
+                cond_jump_stmt.false_target.value = new_addr
+
         # note that blocks don't have labels inserted at this point
         for node in list(ail_graph.nodes):
             if (
@@ -1267,16 +1282,10 @@ class Clinic(Analysis):
                                 ):
                                     last_stmt.target.value = succs[0].addr
                                 elif isinstance(last_stmt, ailment.Stmt.ConditionalJump):
-                                    if (
-                                        isinstance(last_stmt.true_target, ailment.Expr.Const)
-                                        and last_stmt.true_target.value == node.addr
-                                    ):
-                                        last_stmt.true_target.value = succs[0].addr
-                                    if (
-                                        isinstance(last_stmt.false_target, ailment.Expr.Const)
-                                        and last_stmt.false_target.value == node.addr
-                                    ):
-                                        last_stmt.false_target.value = succs[0].addr
+                                    patch_conditional_jump_target(last_stmt, node.addr, succs[0].addr)
+                                first_cond_jump = first_conditional_jump(pred)
+                                if first_cond_jump is not None and first_cond_jump is not last_stmt:
+                                    patch_conditional_jump_target(first_cond_jump, node.addr, succs[0].addr)
                             ail_graph.add_edge(pred, succs[0])
                         ail_graph.remove_node(node)
 
@@ -1349,6 +1358,19 @@ class Clinic(Analysis):
                     return op1, op0
                 return op0, op1  # best-effort guess
         return None, None
+
+    def new_block_addr(self) -> int:
+        """
+        Return a block address that does not conflict with any existing blocks.
+
+        :return:    The block address.
+        """
+        if self._new_block_addrs:
+            new_addr = max(self._new_block_addrs) + 1
+        else:
+            new_addr = max(self.function.block_addrs_set) + 2048
+        self._new_block_addrs.add(new_addr)
+        return new_addr
 
     @staticmethod
     @timethis
