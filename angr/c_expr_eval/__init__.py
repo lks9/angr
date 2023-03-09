@@ -26,7 +26,7 @@ def c_expr_eval(c_expr: str, variable_lookup) -> claripy.ast.bv.BV:
     Example:
         >>> angr.types.register_types(angr.types.parse_type('struct abcd { int x; int y; }'))
         >>> c_expr = "myvar == ((struct abcd)mystructvar).y"
-        >>> variable_lookup = lambda varname: state.mem(p.loader.main_object.get_symbol( varname ).rebased_addr)
+        >>> variable_lookup = lambda varname: state.mem[p.loader.main_object.get_symbol( varname ).rebased_addr]
         >>> translate_expr(c_expr, variable_lookup)
         <Bool True>
 
