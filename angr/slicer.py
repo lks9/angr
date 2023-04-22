@@ -9,7 +9,12 @@ class SimLightState:
     Represents a program state. Only used in SimSlicer.
     """
 
-    __slots__ = ('temps', 'regs', 'stack_offsets', 'options', )
+    __slots__ = (
+        "temps",
+        "regs",
+        "stack_offsets",
+        "options",
+    )
 
     def __init__(self, temps=None, regs=None, stack_offsets=None, options=None):
         self.temps = temps if temps is not None else set()
@@ -22,8 +27,18 @@ class SimSlicer:
     """
     A super lightweight intra-IRSB slicing class.
     """
-    def __init__(self, arch, statements, target_tmps=None, target_regs=None, target_stack_offsets=None,
-                 inslice_callback=None, inslice_callback_infodict=None):
+
+    def __init__(
+        self,
+        arch,
+        statements,
+        target_tmps=None,
+        target_regs=None,
+        target_stack_offsets=None,
+        inslice_callback=None,
+        inslice_callback_infodict=None,
+        include_imarks: bool = True,
+    ):
         self._arch = arch
         self._statements = statements
         self._target_tmps = target_tmps if target_tmps is not None else set()
@@ -31,18 +46,21 @@ class SimSlicer:
         self._target_stack_offsets = target_stack_offsets if target_stack_offsets is not None else set()
 
         self._inslice_callback = inslice_callback
+        self._include_imarks = include_imarks
 
         # It could be accessed publicly
         self.inslice_callback_infodict = inslice_callback_infodict
 
-        self.stmts = [ ]
-        self.stmt_indices = [ ]
+        self.stmts = []
+        self.stmt_indices = []
         self.final_regs = set()
         self.final_stack_offsets = set()
 
         if not self._target_tmps and not self._target_regs and not self._target_stack_offsets:
-            raise SimSlicerError('You must specify at least one of the following: "'
-                                 'target temps, target registers, and/or target stack offsets.')
+            raise SimSlicerError(
+                'You must specify at least one of the following: "'
+                "target temps, target registers, and/or target stack offsets."
+            )
 
         # convert target registers to base registers
         target_base_regs = set()
@@ -54,7 +72,7 @@ class SimSlicer:
                 target_base_regs.add(base_reg[0])
         self._target_regs = target_base_regs
 
-        self._aliases = { }
+        self._aliases = {}
 
         self._alias_analysis()
         self._slice()
@@ -80,9 +98,9 @@ class SimSlicer:
             },
             temps={},
             options={
-            'mock_sp': mock_sp,
-            'mock_bp': mock_bp,
-            }
+                "mock_sp": mock_sp,
+                "mock_bp": mock_bp,
+            },
         )
 
         for stmt in self._statements:
@@ -136,10 +154,10 @@ class SimSlicer:
     def _forward_handler_expr_Get(self, expr, state):
         reg = expr.offset
 
-        if state.options['mock_sp'] and reg == self._arch.sp_offset:
+        if state.options["mock_sp"] and reg == self._arch.sp_offset:
             return state.regs[reg]
 
-        elif state.options['mock_bp'] and reg == self._arch.bp_offset:
+        elif state.options["mock_bp"] and reg == self._arch.bp_offset:
             return state.regs[reg]
 
         return None
@@ -153,11 +171,9 @@ class SimSlicer:
         return None
 
     def _forward_handler_expr_Const(self, expr, state):  # pylint:disable=unused-argument
-
         return expr.con.value
 
     def _forward_handler_expr_Binop(self, expr, state):
-
         funcname = "_forward_handler_expr_binop_%s" % expr.op.strip("Iop_")
 
         if hasattr(self, funcname):
@@ -169,12 +185,10 @@ class SimSlicer:
         return None
 
     def _forward_handler_expr_binop_Add64(self, op0, op1, state):  # pylint:disable=unused-argument
-
-        return (op0 + op1) & (2 ** 64 - 1)
+        return (op0 + op1) & (2**64 - 1)
 
     def _forward_handler_expr_binop_Add32(self, op0, op1, state):  # pylint:disable=unused-argument
-
-        return (op0 + op1) & (2 ** 32 - 1)
+        return (op0 + op1) & (2**32 - 1)
 
     #
     # Backward slicing
@@ -220,7 +234,7 @@ class SimSlicer:
 
     def _backward_handler_stmt_IMark(self, stmt, state) -> bool:  # pylint:disable=unused-argument
         # include all IMark statements
-        return True
+        return self._include_imarks
 
     def _backward_handler_stmt_WrTmp(self, stmt, state):
         tmp = stmt.tmp
@@ -234,7 +248,7 @@ class SimSlicer:
 
         return True
 
-    def _backward_handler_stmt_Put(self, stmt : pyvex.IRStmt.Put, state):
+    def _backward_handler_stmt_Put(self, stmt: pyvex.IRStmt.Put, state):
         reg = stmt.offset
         # convert it to its base register
         base_reg = self._arch.get_base_register(reg)
@@ -252,7 +266,6 @@ class SimSlicer:
             return False
 
     def _backward_handler_stmt_Store(self, stmt, state):
-
         addr = stmt.addr
 
         if type(addr) is pyvex.IRExpr.RdTmp:
@@ -272,7 +285,6 @@ class SimSlicer:
         return False
 
     def _backward_handler_stmt_LoadG(self, expr, state):
-
         if expr.dst not in state.temps:
             return False
 
@@ -326,19 +338,16 @@ class SimSlicer:
             self._backward_handler_expr(arg, state)
 
     def _backward_handler_expr_CCall(self, expr, state):
-
         for arg in expr.args:
             if type(arg) is pyvex.IRExpr.RdTmp:
                 self._backward_handler_expr(arg, state)
 
     def _backward_handler_expr_Binop(self, expr, state):
-
         for arg in expr.args:
             if type(arg) is pyvex.IRExpr.RdTmp:
                 self._backward_handler_expr(arg, state)
 
     def _backward_handler_expr_ITE(self, expr, state):
-
         self._backward_handler_expr(expr.cond, state)
         self._backward_handler_expr(expr.iftrue, state)
         self._backward_handler_expr(expr.iffalse, state)

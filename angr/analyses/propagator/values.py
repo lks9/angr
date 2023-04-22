@@ -2,8 +2,7 @@
 
 
 class Top:
-
-    __slots__ = ('size', )
+    __slots__ = ("size",)
 
     def __init__(self, size):
         self.size = size

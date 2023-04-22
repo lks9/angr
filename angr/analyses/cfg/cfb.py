@@ -1,5 +1,5 @@
 import logging
-import cffi
+from typing import Any, Callable, Optional, Set
 
 import cle
 from cle.backends.externs import KernelObject, ExternObject
@@ -17,11 +17,11 @@ class CFBlanketView:
     """
     A view into the control-flow blanket.
     """
+
     def __init__(self, cfb):
         self._cfb = cfb
 
     def __getitem__(self, item):
-
         if isinstance(item, slice):
             addr = item.start
             start_addr = self._cfb.floor_addr(addr)
@@ -52,6 +52,7 @@ class MemoryRegion:
 
     def __repr__(self):
         return f"<MemoryRegion {self.addr:#x}-{self.addr+self.size:#x}, type {self.type}>"
+
 
 #
 # An address can be mapped to one of the following types of object
@@ -91,10 +92,19 @@ class CFBlanket(Analysis):
     - tls
     - kernel
     """
-    def __init__(self, exclude_region_types=None):
+
+    def __init__(
+        self,
+        exclude_region_types: Optional[Set[str]] = None,
+        on_object_added: Optional[Callable[[int, Any], None]] = None,
+    ):
+        """
+        :param on_object_added: Callable with parameters (addr, obj) called after an object is added to the blanket.
+        """
         self._blanket = SortedDict()
 
-        self._regions = [ ]
+        self._on_object_added_callback = on_object_added
+        self._regions = []
         self._exclude_region_types = set() if not exclude_region_types else exclude_region_types
 
         self._init_regions()
@@ -106,7 +116,6 @@ class CFBlanket(Analysis):
         self._mark_unknowns()
 
     def _init_regions(self):
-
         for obj in self.project.loader.all_objects:
             if isinstance(obj, cle.MetaELF):
                 if obj.sections:
@@ -114,26 +123,30 @@ class CFBlanket(Analysis):
                         # Enumerate sections in an ELF file
                         for section in obj.sections:
                             if section.occupies_memory:
-                                mr = MemoryRegion(section.vaddr, section.memsize, 'section', obj, section)
+                                mr = MemoryRegion(section.vaddr, section.memsize, "section", obj, section)
                                 self._regions.append(mr)
                 elif obj.segments:
                     if "segment" not in self._exclude_region_types:
                         for segment in obj.segments:
                             if segment.memsize > 0:
-                                mr = MemoryRegion(segment.vaddr, segment.memsize, 'segment', obj, segment)
+                                mr = MemoryRegion(segment.vaddr, segment.memsize, "segment", obj, segment)
                                 self._regions.append(mr)
                 else:
-                    raise NotImplementedError("Currently ELFs without sections or segments are not supported. Please "
-                                              "implement or complain on GitHub.")
+                    raise NotImplementedError(
+                        "Currently ELFs without sections or segments are not supported. Please "
+                        "implement or complain on GitHub."
+                    )
             elif isinstance(obj, cle.PE):
                 if obj.sections:
                     if "section" not in self._exclude_region_types:
                         for section in obj.sections:
-                            mr = MemoryRegion(section.vaddr, section.memsize, 'section', obj, section)
+                            mr = MemoryRegion(section.vaddr, section.memsize, "section", obj, section)
                             self._regions.append(mr)
                 else:
-                    raise NotImplementedError("Currently PEs without sections are not supported. Please report to "
-                                              "GitHub and provide an example binary.")
+                    raise NotImplementedError(
+                        "Currently PEs without sections are not supported. Please report to "
+                        "GitHub and provide an example binary."
+                    )
             elif isinstance(obj, KernelObject):
                 if "kernel" not in self._exclude_region_types:
                     size = obj.max_addr - obj.min_addr
@@ -221,6 +234,8 @@ class CFBlanket(Analysis):
         Adds an object `obj` to the blanket at the specified address `addr`
         """
         self._blanket[addr] = obj
+        if self._on_object_added_callback:
+            self._on_object_added_callback(addr, obj)
 
     def add_function(self, func):
         """
@@ -237,7 +252,7 @@ class CFBlanket(Analysis):
         :rtype:     str
         """
 
-        output = [ ]
+        output = []
 
         for obj in self.project.loader.all_objects:
             for section in obj.sections:
@@ -253,8 +268,10 @@ class CFBlanket(Analysis):
                         addr, thing = self.floor_item(pos)
                         output.append(f"{addr:#x}: {repr(thing)}")
 
-                        if thing.size == 0: pos += 1
-                        else: pos += thing.size
+                        if thing.size == 0:
+                            pos += 1
+                        else:
+                            pos += thing.size
                     except KeyError:
                         pos += 1
 
@@ -268,12 +285,12 @@ class CFBlanket(Analysis):
 
         :return: None
         """
-        if 'CFGFast' not in self.kb.cfgs:
+        if "CFGFast" not in self.kb.cfgs:
             return
-        cfg_model = self.kb.cfgs['CFGFast']
+        cfg_model = self.kb.cfgs["CFGFast"]
 
         for addr, memory_data in cfg_model.memory_data.items():
-            memory_data : MemoryData
+            memory_data: MemoryData
             if memory_data.sort == MemoryDataSort.CodeReference:
                 # skip Code Reference
                 continue
@@ -333,7 +350,6 @@ class CFBlanket(Analysis):
                 self._mark_unknowns_core(min_addr, max_addr + 1, obj=obj)
 
     def _mark_unknowns_core(self, min_addr, max_addr, obj=None, segment=None, section=None):
-
         # The region should be [min_addr, max_addr)
 
         try:
@@ -354,22 +370,27 @@ class CFBlanket(Analysis):
                 bytes_ = None
             else:
                 try:
-                    _l.debug("Loading bytes from object %s, section %s, segmeng %s, addresss %#x.",
-                             obj, section, segment, min_addr)
+                    _l.debug(
+                        "Loading bytes from object %s, section %s, segment %s, address %#x.",
+                        obj,
+                        section,
+                        segment,
+                        min_addr,
+                    )
                     bytes_ = self.project.loader.memory.load(min_addr, size)
                 except KeyError:
                     # The address does not exist
                     bytes_ = None
-            self.add_obj(min_addr,
-                         Unknown(min_addr, size, bytes_=bytes_, object_=obj, segment=segment, section=section)
-                         )
+            self.add_obj(
+                min_addr, Unknown(min_addr, size, bytes_=bytes_, object_=obj, segment=segment, section=section)
+            )
 
         addr = min_addr
         while addr < max_addr:
             last_addr, last_item = self.floor_item(addr)
             if last_addr < min_addr:
                 # impossible
-                raise Exception('Impossible')
+                raise Exception("Impossible")
 
             if last_item.size == 0 or last_item.size is None:
                 # Make sure everything has a non-zero size
@@ -389,20 +410,26 @@ class CFBlanket(Analysis):
                         bytes_ = None
                     else:
                         try:
-                            _l.debug("Loading bytes from object %s, section %s, segmeng %s, addresss %#x.",
-                                     obj, section, segment, next_addr)
+                            _l.debug(
+                                "Loading bytes from object %s, section %s, segment %s, address %#x.",
+                                obj,
+                                section,
+                                segment,
+                                next_addr,
+                            )
                             bytes_ = self.project.loader.memory.load(next_addr, size)
                         except KeyError:
                             # The address does not exist
                             bytes_ = None
-                    self.add_obj(end_addr,
-                                 Unknown(end_addr, size, bytes_=bytes_, object_=obj, segment=segment, section=section)
-                                 )
+                    self.add_obj(
+                        end_addr, Unknown(end_addr, size, bytes_=bytes_, object_=obj, segment=segment, section=section)
+                    )
                 addr = next_addr
             else:
                 addr = max_addr
 
 
 from angr.analyses import AnalysesHub
-AnalysesHub.register_default('CFB', CFBlanket)
-AnalysesHub.register_default('CFBlanket', CFBlanket)
+
+AnalysesHub.register_default("CFB", CFBlanket)
+AnalysesHub.register_default("CFBlanket", CFBlanket)

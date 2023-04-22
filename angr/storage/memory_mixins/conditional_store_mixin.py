@@ -2,6 +2,7 @@ import claripy
 
 from . import MemoryMixin
 
+
 class ConditionalMixin(MemoryMixin):
     def load(self, addr, condition=None, fallback=None, **kwargs):
         res = super().load(addr, condition=condition, **kwargs)
@@ -10,7 +11,6 @@ class ConditionalMixin(MemoryMixin):
         return res
 
     def store(self, addr, data, size=None, condition=None, **kwargs):
-
         condition = self.state._adjust_condition(condition)
 
         if condition is None or self.state.solver.is_true(condition):

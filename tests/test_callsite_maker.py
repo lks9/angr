@@ -9,9 +9,10 @@ import ailment
 # pylint: disable=no-self-use
 class TestCallsiteMaker(unittest.TestCase):
     def test_callsite_maker(self):
-
-        project = angr.Project(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                            '..', '..', 'binaries', 'tests', 'x86_64', 'all'), auto_load_libs=False)
+        project = angr.Project(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "binaries", "tests", "x86_64", "all"),
+            auto_load_libs=False,
+        )
 
         manager = ailment.Manager(arch=project.arch)
 
@@ -24,13 +25,14 @@ class TestCallsiteMaker(unittest.TestCase):
             for func in cfg.kb.functions.values():
                 if func.calling_convention is None:
                     # determine the calling convention of each function
+                    project.analyses.VariableRecoveryFast(func)
                     cc_analysis = project.analyses.CallingConvention(func)
                     if cc_analysis.cc is not None:
                         func.calling_convention = cc_analysis.cc
                         func.prototype = cc_analysis.prototype
                         new_cc_found = True
 
-        main_func = cfg.kb.functions['main']
+        main_func = cfg.kb.functions["main"]
 
         for block in sorted(main_func.blocks, key=lambda x: x.addr):
             print(block.vex.pp())

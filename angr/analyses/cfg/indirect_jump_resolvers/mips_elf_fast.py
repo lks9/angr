@@ -1,4 +1,4 @@
-# pylint:disable=too-many-boolean-expressions
+# pylint:disable=too-many-boolean-expressions,global-statement
 from typing import Dict, Optional, Tuple, TYPE_CHECKING
 import logging
 
@@ -19,13 +19,28 @@ if TYPE_CHECKING:
 
 l = logging.getLogger(name=__name__)
 
-# hit_case_0, hit_case_1, miss = 0, 0, 0
+PROFILING = False
+HITS_CASE_0, HITS_CASE_1, MISSES = 0, 0, 0
+
+
+def enable_profiling():
+    global PROFILING, HITS_CASE_0, HITS_CASE_1, MISSES
+    PROFILING = True
+    HITS_CASE_0 = 0
+    HITS_CASE_1 = 0
+    MISSES = 0
+
+
+def disable_profiling():
+    global PROFILING
+    PROFILING = False
 
 
 class OverwriteTmpValueCallback:
     """
     Overwrites temporary values during resolution
     """
+
     def __init__(self, gp_value):
         self.gp_value = gp_value
 
@@ -35,17 +50,26 @@ class OverwriteTmpValueCallback:
 
 class MipsElfFastResolver(IndirectJumpResolver):
     """
-    Indirect Jump Resolver for MIPs
+    A timeless indirect jump resolver for R9-based indirect function calls in MIPS ELFs.
     """
+
     def __init__(self, project):
         super().__init__(project, timeless=True)
 
     def filter(self, cfg, addr, func_addr, block, jumpkind):
-        if not isinstance(self.project.arch, (archinfo.ArchMIPS32, archinfo.ArchMIPS64, )):
+        if not isinstance(
+            self.project.arch,
+            (
+                archinfo.ArchMIPS32,
+                archinfo.ArchMIPS64,
+            ),
+        ):
             return False
         return True
 
-    def resolve(self, cfg, addr, func_addr, block, jumpkind):
+    def resolve(  # pylint:disable=unused-argument
+        self, cfg, addr, func_addr, block, jumpkind, func_graph_complete: bool = True, **kwargs
+    ):
         """
         Wrapper for _resolve that slowly increments the max_depth used by Blade for finding sources
         until we can resolve the addr or we reach the default max_depth
@@ -78,14 +102,27 @@ class MipsElfFastResolver(IndirectJumpResolver):
         :rtype: tuple
         """
 
+        global HITS_CASE_0, HITS_CASE_1, MISSES
+
         project = self.project
 
-        b = Blade(cfg.graph, addr, -1, cfg=cfg, project=project, ignore_sp=True, ignore_bp=True,
-                  ignored_regs=('gp',), cross_insn_opt=False, stop_at_calls=True, max_level=max_level
-                  )
+        b = Blade(
+            cfg.graph,
+            addr,
+            -1,
+            cfg=cfg,
+            project=project,
+            ignore_sp=True,
+            ignore_bp=True,
+            ignored_regs=("gp",),
+            cross_insn_opt=False,
+            stop_at_calls=True,
+            max_level=max_level,
+            include_imarks=False,
+        )
 
         func = cfg.kb.functions.function(addr=func_addr)
-        gp_value = func.info.get('gp', None)
+        gp_value = func.info.get("gp", None)
 
         # see if gp is used on this slice at all
         gp_used = self._is_gp_used_on_slice(project, b)
@@ -94,25 +131,26 @@ class MipsElfFastResolver(IndirectJumpResolver):
             # before its use site.
             # however, it should have been determined in CFGFast
             # cannot determine the value of gp. quit
-            l.warning('Failed to determine value of register gp for function %#x.', func.addr)
-            return False, [ ]
-
-        # global hit_case_0, hit_case_1, miss
+            l.warning("Failed to determine value of register gp for function %#x.", func.addr)
+            return False, []
 
         if gp_value is not None:
             target = self._try_handle_simple_case_0(gp_value, b)
             if target is not None:
-                # hit_case_0 += 1
-                # print(f"hit/miss: {hit_case_0 + hit_case_1}/{miss}, {hit_case_0}|{hit_case_1}")
-                return True, [ target ]
+                if PROFILING:
+                    HITS_CASE_0 += 1
+                    # print(f"hit/miss: {HITS_CASE_0 + HITS_CASE_1}/{MISSES}, {HITS_CASE_0}|{HITS_CASE_1}")
+                return True, [target]
             target = self._try_handle_simple_case_1(gp_value, b)
             if target is not None:
-                # hit_case_1 += 1
-                # print(f"hit/miss: {hit_case_0 + hit_case_1}/{miss}, {hit_case_0}|{hit_case_1}")
-                return True, [ target ]
+                if PROFILING:
+                    HITS_CASE_1 += 1
+                    # print(f"hit/miss: {HITS_CASE_0 + HITS_CASE_1}/{MISSES}, {HITS_CASE_0}|{HITS_CASE_1}")
+                return True, [target]
 
-        # miss += 1
-        # print(f"hit/miss: {hit_case_0 + hit_case_1}/{miss}, {hit_case_0}|{hit_case_1}")
+        if PROFILING:
+            MISSES += 1
+            # print(f"hit/miss: {HITS_CASE_0 + HITS_CASE_1}/{MISSES}, {HITS_CASE_0}|{HITS_CASE_1}")
 
         sources = [n for n in b.slice.nodes() if b.slice.in_degree(n) == 0]
         if not sources:
@@ -123,20 +161,22 @@ class MipsElfFastResolver(IndirectJumpResolver):
         annotated_cfg = AnnotatedCFG(project, None, detect_loops=False)
         annotated_cfg.from_digraph(b.slice)
 
-        state = project.factory.blank_state(addr=source_addr, mode="fastpath",
-                                            remove_options=options.refs,
-                                            # suppress unconstrained stack reads for `gp`
-                                            add_options={
-                                                options.SYMBOL_FILL_UNCONSTRAINED_REGISTERS,
-                                                options.SYMBOL_FILL_UNCONSTRAINED_MEMORY,
-                                                options.NO_CROSS_INSN_OPT,
-                                            },
-                                            )
+        state = project.factory.blank_state(
+            addr=source_addr,
+            mode="fastpath",
+            remove_options=options.refs,
+            # suppress unconstrained stack reads for `gp`
+            add_options={
+                options.SYMBOL_FILL_UNCONSTRAINED_REGISTERS,
+                options.SYMBOL_FILL_UNCONSTRAINED_MEMORY,
+                options.NO_CROSS_INSN_OPT,
+            },
+        )
         state.regs._t9 = func_addr
 
         if gp_used:
             # Special handling for cases where `gp` is stored on the stack
-            gp_offset = project.arch.registers['gp'][0]
+            gp_offset = project.arch.registers["gp"][0]
             self._set_gp_load_callback(state, b, project, gp_offset, gp_value)
             state.regs._gp = gp_value
 
@@ -150,18 +190,18 @@ class MipsElfFastResolver(IndirectJumpResolver):
                 target_state = next(iter(cut for cut in simgr.cut if cut.history.addr == addr))
             except StopIteration:
                 l.info("Indirect jump at %#x cannot be resolved by %s.", addr, repr(self))
-                return False, [ ]
+                return False, []
             target = target_state.addr
 
             if self._is_target_valid(cfg, target) and target != func_addr:
                 l.debug("Indirect jump at %#x is resolved to target %#x.", addr, target)
-                return True, [ target ]
+                return True, [target]
 
             l.info("Indirect jump at %#x is resolved to target %#x, which seems to be invalid.", addr, target)
-            return False, [ ]
+            return False, []
 
         l.info("Indirect jump at %#x cannot be resolved by %s.", addr, repr(self))
-        return False, [ ]
+        return False, []
 
     def _try_handle_simple_case_0(self, gp: int, blade: Blade) -> Optional[int]:
         # we only attempt to support the following case:
@@ -172,7 +212,7 @@ class MipsElfFastResolver(IndirectJumpResolver):
         #  + E | t8 = GET:I32(t9)
         #  Next: t8
 
-        nodes_with_no_outedges = [ ]
+        nodes_with_no_outedges = []
         for node in blade.slice.nodes():
             if blade.slice.out_degree(node) == 0:
                 nodes_with_no_outedges.append(node)
@@ -218,9 +258,11 @@ class MipsElfFastResolver(IndirectJumpResolver):
         if previous_node is None:
             return None
         stmt = end_block.statements[previous_node[1]]
-        if not isinstance(stmt, pyvex.IRStmt.WrTmp) \
-                or not isinstance(stmt.data, pyvex.IRExpr.Load) \
-                or not isinstance(stmt.data.addr, pyvex.IRExpr.RdTmp):
+        if (
+            not isinstance(stmt, pyvex.IRStmt.WrTmp)
+            or not isinstance(stmt.data, pyvex.IRExpr.Load)
+            or not isinstance(stmt.data.addr, pyvex.IRExpr.RdTmp)
+        ):
             return None
         if stmt.tmp != data_tmp:
             return None
@@ -231,12 +273,14 @@ class MipsElfFastResolver(IndirectJumpResolver):
         if previous_node is None:
             return None
         stmt = end_block.statements[previous_node[1]]
-        if not isinstance(stmt, pyvex.IRStmt.WrTmp) \
-                or stmt.tmp != addr_tmp \
-                or not isinstance(stmt.data, pyvex.IRExpr.Binop) \
-                or stmt.data.op != "Iop_Add32" \
-                or not isinstance(stmt.data.args[0], pyvex.IRExpr.RdTmp) \
-                or not isinstance(stmt.data.args[1], pyvex.IRExpr.Const):
+        if (
+            not isinstance(stmt, pyvex.IRStmt.WrTmp)
+            or stmt.tmp != addr_tmp
+            or not isinstance(stmt.data, pyvex.IRExpr.Binop)
+            or stmt.data.op != "Iop_Add32"
+            or not isinstance(stmt.data.args[0], pyvex.IRExpr.RdTmp)
+            or not isinstance(stmt.data.args[1], pyvex.IRExpr.Const)
+        ):
             return None
         add_tmp = stmt.data.args[0].tmp
         add_const = stmt.data.args[1].con.value
@@ -246,15 +290,17 @@ class MipsElfFastResolver(IndirectJumpResolver):
         if previous_node is None:
             return None
         stmt = end_block.statements[previous_node[1]]
-        if not isinstance(stmt, pyvex.IRStmt.WrTmp) \
-                or stmt.tmp != add_tmp \
-                or not isinstance(stmt.data, pyvex.IRExpr.Get):
+        if (
+            not isinstance(stmt, pyvex.IRStmt.WrTmp)
+            or stmt.tmp != add_tmp
+            or not isinstance(stmt.data, pyvex.IRExpr.Get)
+        ):
             return None
         if stmt.data.offset != self.project.arch.registers["gp"][0]:
             return None
 
         # matching complete
-        addr = (gp + add_const) & 0xffff_ffff
+        addr = (gp + add_const) & 0xFFFF_FFFF
         try:
             target = self.project.loader.memory.unpack_word(addr, size=4)
             return target
@@ -273,7 +319,7 @@ class MipsElfFastResolver(IndirectJumpResolver):
         #  + H | t4 = GET:I32(t9)
         #  + Next: t4
 
-        nodes_with_no_outedges = [ ]
+        nodes_with_no_outedges = []
         for node in blade.slice.nodes():
             if blade.slice.out_degree(node) == 0:
                 nodes_with_no_outedges.append(node)
@@ -319,12 +365,14 @@ class MipsElfFastResolver(IndirectJumpResolver):
         if previous_node is None:
             return None
         stmt = end_block.statements[previous_node[1]]
-        if not isinstance(stmt, pyvex.IRStmt.WrTmp) \
-                or not stmt.tmp == t9_tmp_G \
-                or not isinstance(stmt.data, pyvex.IRExpr.Binop) \
-                or stmt.data.op != "Iop_Add32" \
-                or not isinstance(stmt.data.args[0], pyvex.IRExpr.RdTmp) \
-                or not isinstance(stmt.data.args[1], pyvex.IRExpr.Const):
+        if (
+            not isinstance(stmt, pyvex.IRStmt.WrTmp)
+            or not stmt.tmp == t9_tmp_G
+            or not isinstance(stmt.data, pyvex.IRExpr.Binop)
+            or stmt.data.op != "Iop_Add32"
+            or not isinstance(stmt.data.args[0], pyvex.IRExpr.RdTmp)
+            or not isinstance(stmt.data.args[1], pyvex.IRExpr.Const)
+        ):
             return None
         t9_tmp_F = stmt.data.args[0].tmp
         t9_add_const = stmt.data.args[1].con.value
@@ -357,9 +405,11 @@ class MipsElfFastResolver(IndirectJumpResolver):
         if previous_node is None:
             return None
         stmt = end_block.statements[previous_node[1]]
-        if not isinstance(stmt, pyvex.IRStmt.WrTmp) \
-                or not isinstance(stmt.data, pyvex.IRExpr.Load) \
-                or not isinstance(stmt.data.addr, pyvex.IRExpr.RdTmp):
+        if (
+            not isinstance(stmt, pyvex.IRStmt.WrTmp)
+            or not isinstance(stmt.data, pyvex.IRExpr.Load)
+            or not isinstance(stmt.data.addr, pyvex.IRExpr.RdTmp)
+        ):
             return None
         if stmt.tmp != t9_tmp_D:
             return None
@@ -370,12 +420,14 @@ class MipsElfFastResolver(IndirectJumpResolver):
         if previous_node is None:
             return None
         stmt = end_block.statements[previous_node[1]]
-        if not isinstance(stmt, pyvex.IRStmt.WrTmp) \
-                or stmt.tmp != addr_tmp \
-                or not isinstance(stmt.data, pyvex.IRExpr.Binop) \
-                or stmt.data.op != "Iop_Add32" \
-                or not isinstance(stmt.data.args[0], pyvex.IRExpr.RdTmp) \
-                or not isinstance(stmt.data.args[1], pyvex.IRExpr.Const):
+        if (
+            not isinstance(stmt, pyvex.IRStmt.WrTmp)
+            or stmt.tmp != addr_tmp
+            or not isinstance(stmt.data, pyvex.IRExpr.Binop)
+            or stmt.data.op != "Iop_Add32"
+            or not isinstance(stmt.data.args[0], pyvex.IRExpr.RdTmp)
+            or not isinstance(stmt.data.args[1], pyvex.IRExpr.Const)
+        ):
             return None
         add_tmp = stmt.data.args[0].tmp
         add_const = stmt.data.args[1].con.value
@@ -385,18 +437,20 @@ class MipsElfFastResolver(IndirectJumpResolver):
         if previous_node is None:
             return None
         stmt = end_block.statements[previous_node[1]]
-        if not isinstance(stmt, pyvex.IRStmt.WrTmp) \
-                or stmt.tmp != add_tmp \
-                or not isinstance(stmt.data, pyvex.IRExpr.Get):
+        if (
+            not isinstance(stmt, pyvex.IRStmt.WrTmp)
+            or stmt.tmp != add_tmp
+            or not isinstance(stmt.data, pyvex.IRExpr.Get)
+        ):
             return None
         if stmt.data.offset != self.project.arch.registers["gp"][0]:
             return None
 
         # matching complete
-        addr = (gp + add_const) & 0xffff_ffff
+        addr = (gp + add_const) & 0xFFFF_FFFF
         try:
             target_0 = self.project.loader.memory.unpack_word(addr, size=4)
-            target = (target_0 + t9_add_const) & 0xffff_ffff
+            target = (target_0 + t9_add_const) & 0xFFFF_FFFF
             return target
         except KeyError:
             return None
@@ -417,26 +471,29 @@ class MipsElfFastResolver(IndirectJumpResolver):
             for stmt in project.factory.block(block_addr_in_slice, cross_insn_opt=False).vex.statements:
                 if isinstance(stmt, pyvex.IRStmt.WrTmp) and isinstance(stmt.data, pyvex.IRExpr.Load):
                     # Load from memory to a tmp - assuming it's loading from the stack
-                    tmps[stmt.tmp] = 'stack'
+                    tmps[stmt.tmp] = "stack"
                 elif isinstance(stmt, pyvex.IRStmt.Put) and stmt.offset == gp_offset:
                     if isinstance(stmt.data, pyvex.IRExpr.RdTmp):
                         tmp_offset = stmt.data.tmp  # pylint:disable=cell-var-from-loop
-                        if tmps.get(tmp_offset, None) == 'stack':
+                        if tmps.get(tmp_offset, None) == "stack":
                             # found the load from stack
                             # we must make sure value of that temporary variable equals to the correct gp value
-                            state.inspect.make_breakpoint('tmp_write', when=BP_BEFORE,
-                                        condition=lambda s, bbl_addr_=block_addr_in_slice,
-                                                        tmp_offset_=tmp_offset:
-                                        s.scratch.bbl_addr == bbl_addr_ and s.inspect.tmp_write_num == tmp_offset_,
-                                        action=OverwriteTmpValueCallback(
-                                        gp_value).overwrite_tmp_value
-                                        )
+                            state.inspect.make_breakpoint(
+                                "tmp_write",
+                                when=BP_BEFORE,
+                                condition=(
+                                    lambda s, bbl_addr_=block_addr_in_slice, tmp_offset_=tmp_offset: s.scratch.bbl_addr
+                                    == bbl_addr_
+                                    and s.inspect.tmp_write_num == tmp_offset_
+                                ),
+                                action=OverwriteTmpValueCallback(gp_value).overwrite_tmp_value,
+                            )
                             break
 
     @staticmethod
     def _is_gp_used_on_slice(project, b: Blade) -> bool:
-        gp_offset = project.arch.registers['gp'][0]
-        blocks_on_slice: Dict[int, 'Block'] = { }
+        gp_offset = project.arch.registers["gp"][0]
+        blocks_on_slice: Dict[int, "Block"] = {}
         for block_addr, block_stmt_idx in b.slice.nodes():
             if block_addr not in blocks_on_slice:
                 blocks_on_slice[block_addr] = project.factory.block(block_addr, cross_insn_opt=False)
@@ -447,9 +504,11 @@ class MipsElfFastResolver(IndirectJumpResolver):
                     break
             else:
                 stmt = block.vex.statements[block_stmt_idx]
-                if isinstance(stmt, pyvex.IRStmt.WrTmp) \
-                        and isinstance(stmt.data, pyvex.IRExpr.Get) \
-                        and stmt.data.offset == gp_offset:
+                if (
+                    isinstance(stmt, pyvex.IRStmt.WrTmp)
+                    and isinstance(stmt.data, pyvex.IRExpr.Get)
+                    and stmt.data.offset == gp_offset
+                ):
                     gp_used = True
                     break
         else:

@@ -1,4 +1,4 @@
-from typing import Dict, Tuple, Set, Optional, TYPE_CHECKING
+from typing import Dict, Tuple, Set, Union, Optional, TYPE_CHECKING
 
 from .uses import Uses
 from .live_definitions import LiveDefinitions
@@ -12,15 +12,16 @@ class ReachingDefinitionsModel:
     """
     Models the definitions, uses, and memory of a ReachingDefinitionState object
     """
-    def __init__(self, func_addr: Optional[int]=None):
+
+    def __init__(self, func_addr: Optional[int] = None):
         self.func_addr = func_addr  # do not use. only for pretty-printing
-        self.observed_results: Dict[Tuple[str, int, int], LiveDefinitions] = {}
-        self.all_definitions: Set['Definition'] = set()
+        self.observed_results: Dict[Tuple[str, Union[int, Tuple[int, int]], int], LiveDefinitions] = {}
+        self.all_definitions: Set["Definition"] = set()
         self.all_uses = Uses()
 
     def __repr__(self):
         return "<RDModel{} with {} observations>".format(
-            "[func %#x]" if self.func_addr is not None else "",
+            f"[func {self.func_addr:#x}]" if self.func_addr is not None else "",
             len(self.observed_results),
         )
 
@@ -31,7 +32,7 @@ class ReachingDefinitionsModel:
         new.all_uses = self.all_uses.copy()
         return new
 
-    def merge(self, model: 'ReachingDefinitionsModel'):
+    def merge(self, model: "ReachingDefinitionsModel"):
         for k, v in model.observed_results.items():
             if k not in self.observed_results:
                 self.observed_results[k] = v

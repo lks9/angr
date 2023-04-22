@@ -49,10 +49,9 @@ def parse_stack_pointer(sp):
 
 
 class VariableAnnotation(Annotation):
+    __slots__ = ("addr_and_variables",)
 
-    __slots__ = ('addr_and_variables', )
-
-    def __init__(self, addr_and_variables: List[Tuple[int,SimVariable]]):
+    def __init__(self, addr_and_variables: List[Tuple[int, SimVariable]]):
         self.addr_and_variables = addr_and_variables
 
     @property
@@ -69,7 +68,7 @@ class VariableAnnotation(Annotation):
         return False
 
     def __hash__(self):
-        return hash(('Va', tuple(self.addr_and_variables)))
+        return hash(("Va", tuple(self.addr_and_variables)))
 
     def __repr__(self):
         return f"<VariableAnnotation: {self.addr_and_variables}>"
@@ -81,7 +80,6 @@ class VariableRecoveryBase(Analysis):
     """
 
     def __init__(self, func, max_iterations, store_live_variables: bool):
-
         self.function = func
         self.variable_manager = self.kb.variables
 
@@ -89,7 +87,7 @@ class VariableRecoveryBase(Analysis):
         self._store_live_variables = store_live_variables
 
         self._outstates = {}
-        self._instates: Dict[Any,VariableRecoveryStateBase] = {}
+        self._instates: Dict[Any, VariableRecoveryStateBase] = {}
         self._dominance_frontiers = None
 
     #
@@ -128,10 +126,21 @@ class VariableRecoveryStateBase:
 
     _tops = {}
 
-    def __init__(self, block_addr, analysis, arch, func, stack_region=None, register_region=None, global_region=None,
-                 typevars=None, type_constraints=None, delayed_type_constraints=None, stack_offset_typevars=None,
-                 project=None):
-
+    def __init__(
+        self,
+        block_addr,
+        analysis,
+        arch,
+        func,
+        stack_region=None,
+        register_region=None,
+        global_region=None,
+        typevars=None,
+        type_constraints=None,
+        delayed_type_constraints=None,
+        stack_offset_typevars=None,
+        project=None,
+    ):
         self.block_addr = block_addr
         self._analysis = analysis
         self.arch: Arch = arch
@@ -142,42 +151,55 @@ class VariableRecoveryStateBase:
             self.stack_region: MultiValuedMemory = stack_region
             self.stack_region._phi_maker = self._make_phi_variable
         else:
-            self.stack_region: MultiValuedMemory = MultiValuedMemory(memory_id="mem", top_func=self.top,
-                                                                     phi_maker=self._make_phi_variable,
-                                                                     skip_missing_values_during_merging=True,
-                                                                     page_kwargs={'mo_cmp': self._mo_cmp})
+            self.stack_region: MultiValuedMemory = MultiValuedMemory(
+                memory_id="mem",
+                top_func=self.top,
+                phi_maker=self._make_phi_variable,
+                skip_missing_values_during_merging=True,
+                page_kwargs={"mo_cmp": self._mo_cmp},
+            )
         self.stack_region.set_state(self)
 
         if register_region is not None:
             self.register_region: MultiValuedMemory = register_region
             self.register_region._phi_maker = self._make_phi_variable
         else:
-            self.register_region: MultiValuedMemory = MultiValuedMemory(memory_id="reg", top_func=self.top,
-                                                                        phi_maker=self._make_phi_variable,
-                                                                        skip_missing_values_during_merging=True,
-                                                                        page_kwargs={'mo_cmp': self._mo_cmp})
+            self.register_region: MultiValuedMemory = MultiValuedMemory(
+                memory_id="reg",
+                top_func=self.top,
+                phi_maker=self._make_phi_variable,
+                skip_missing_values_during_merging=True,
+                page_kwargs={"mo_cmp": self._mo_cmp},
+            )
         self.register_region.set_state(self)
 
         if global_region is not None:
             self.global_region: MultiValuedMemory = global_region
             self.global_region._phi_maker = self._make_phi_variable
         else:
-            self.global_region: MultiValuedMemory = MultiValuedMemory(memory_id="mem", top_func=self.top,
-                                                                      phi_maker=self._make_phi_variable,
-                                                                      skip_missing_values_during_merging=True,
-                                                                      page_kwargs={'mo_cmp': self._mo_cmp})
+            self.global_region: MultiValuedMemory = MultiValuedMemory(
+                memory_id="mem",
+                top_func=self.top,
+                phi_maker=self._make_phi_variable,
+                skip_missing_values_during_merging=True,
+                page_kwargs={"mo_cmp": self._mo_cmp},
+            )
         self.global_region.set_state(self)
 
         # Used during merging
         self.successor_block_addr: Optional[int] = None
-        self.phi_variables: Dict[SimVariable,SimVariable] = {}
+        self.phi_variables: Dict[SimVariable, SimVariable] = {}
 
         self.typevars = TypeVariables() if typevars is None else typevars
         self.type_constraints = set() if type_constraints is None else type_constraints
-        self.delayed_type_constraints = DefaultChainMapCOW(set, collapse_threshold=25) \
-            if delayed_type_constraints is None else delayed_type_constraints
-        self.stack_offset_typevars: Dict[int, TypeVariable] = {} if stack_offset_typevars is None else \
-            stack_offset_typevars
+        self.delayed_type_constraints = (
+            DefaultChainMapCOW(set, collapse_threshold=25)
+            if delayed_type_constraints is None
+            else delayed_type_constraints
+        )
+        self.stack_offset_typevars: Dict[int, TypeVariable] = (
+            {} if stack_offset_typevars is None else stack_offset_typevars
+        )
 
     def _get_weakref(self):
         return weakref.proxy(self)
@@ -192,19 +214,20 @@ class VariableRecoveryStateBase:
 
     @staticmethod
     def is_top(thing) -> bool:
-        if isinstance(thing, claripy.ast.BV) and thing.op == "BVS" and thing.args[0] == 'top':
+        if isinstance(thing, claripy.ast.BV) and thing.op == "BVS" and thing.args[0] == "top":
             return True
         return False
 
     @staticmethod
-    def extract_variables(expr: claripy.ast.Base) -> Generator[Tuple[int,Union[SimVariable,SpOffset]],None,None]:
+    def extract_variables(expr: claripy.ast.Base) -> Generator[Tuple[int, Union[SimVariable, SpOffset]], None, None]:
         for anno in expr.annotations:
             if isinstance(anno, VariableAnnotation):
                 yield from anno.addr_and_variables
 
     @staticmethod
-    def annotate_with_variables(expr: claripy.ast.Base,
-                                addr_and_variables: Iterable[Tuple[int,Union[SimVariable,SpOffset]]]) -> claripy.ast.Base:
+    def annotate_with_variables(
+        expr: claripy.ast.Base, addr_and_variables: Iterable[Tuple[int, Union[SimVariable, SpOffset]]]
+    ) -> claripy.ast.Base:
         expr = expr.replace_annotations((VariableAnnotation(list(addr_and_variables)),))
         return expr
 
@@ -227,36 +250,49 @@ class VariableRecoveryStateBase:
                 return True
         return False
 
+    @staticmethod
+    def extract_stack_offset_from_addr(addr: claripy.ast.Base) -> claripy.ast.Base:
+        r = None
+        if addr.op == "BVS":
+            r = claripy.BVV(0, addr.size())
+        elif addr.op == "BVV":
+            r = addr
+        elif addr.op == "__add__":
+            r = sum(VariableRecoveryStateBase.extract_stack_offset_from_addr(arg) for arg in addr.args)
+        elif addr.op == "__sub__":
+            r1 = VariableRecoveryStateBase.extract_stack_offset_from_addr(addr.args[0])
+            r2 = VariableRecoveryStateBase.extract_stack_offset_from_addr(addr.args[1])
+            r = r1 - r2
+        else:
+            # NOTE: The original code here didn't support mul or
+            # anything like that, so let's specify it as 0
+            r = claripy.BVV(0, addr.size())
+        return r
+
     def get_stack_offset(self, addr: claripy.ast.Base) -> Optional[int]:
         if "stack_base" in addr.variables:
-            r = None
-            if addr.op == "BVS":
-                return 0
-            elif addr.op == "__add__":
-                if len(addr.args) == 2 and addr.args[1].op == "BVV":
-                    r = addr.args[1]._model_concrete.value
-                if len(addr.args) == 1:
-                    return 0
-            elif addr.op == "__sub__" and len(addr.args) == 2 and addr.args[1].op == "BVV":
-                r = -addr.args[1]._model_concrete.value
+            r = VariableRecoveryStateBase.extract_stack_offset_from_addr(addr)
 
-            if r is not None:
-                # convert it to a signed integer
-                if r >= 2 ** (self.arch.bits - 1):
-                    return r - 2 ** self.arch.bits
-                if r < -2 ** (self.arch.bits - 1):
-                    return 2 ** self.arch.bits + r
-                return r
+            # extract_stack_offset_from_addr should ensure that r is a BVV
+            assert r.concrete
+
+            val = r._model_concrete.value
+            # convert it to a signed integer
+            if val >= 2 ** (self.arch.bits - 1):
+                return val - 2**self.arch.bits
+            if val < -(2 ** (self.arch.bits - 1)):
+                return 2**self.arch.bits + val
+            return val
 
         return None
 
     def stack_addr_from_offset(self, offset: int) -> int:
         if self.arch.bits == 32:
-            base = 0x7fff_fe00
-            mask = 0xffff_ffff
+            base = 0x7FFF_FE00
+            mask = 0xFFFF_FFFF
         elif self.arch.bits == 64:
-            base = 0x7f_ffff_fffe_0000
-            mask = 0xffff_ffff_ffff_ffff
+            base = 0x7F_FFFF_FFFE_0000
+            mask = 0xFFFF_FFFF_FFFF_FFFF
         else:
             raise RuntimeError("Unsupported bits %d" % self.arch.bits)
         return (offset + base) & mask
@@ -325,7 +361,9 @@ class VariableRecoveryStateBase:
     #
 
     @staticmethod
-    def _mo_cmp(mos_self: Set['SimMemoryObject'], mos_other: Set['SimMemoryObject'], addr: int, size: int):  # pylint:disable=unused-argument
+    def _mo_cmp(
+        mos_self: Set["SimMemoryObject"], mos_other: Set["SimMemoryObject"], addr: int, size: int
+    ):  # pylint:disable=unused-argument
         # comparing bytes from two sets of memory objects
         # we don't need to resort to byte-level comparison. object-level is good enough.
 

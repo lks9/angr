@@ -1,17 +1,23 @@
-angr
-====
+# angr
 
 [![Latest Release](https://img.shields.io/pypi/v/angr.svg)](https://pypi.python.org/pypi/angr/)
+[![Python Version](https://img.shields.io/pypi/pyversions/angr)](https://pypi.python.org/pypi/angr/)
 [![PyPI Statistics](https://img.shields.io/pypi/dm/angr.svg)](https://pypistats.org/packages/angr)
-[![Build Status](https://dev.azure.com/angr/angr/_apis/build/status/angr?branchName=master)](https://dev.azure.com/angr/angr/_build/latest?definitionId=18&branchName=master)
 [![License](https://img.shields.io/github/license/angr/angr.svg)](https://github.com/angr/angr/blob/master/LICENSE)
-[![Gitbook](https://img.shields.io/badge/docs-gitbook-green.svg)](https://docs.angr.io)
-[![API Docs](https://img.shields.io/badge/docs-api-green.svg)](https://angr.io/api-doc)
 
 angr is a platform-agnostic binary analysis framework.
-It is brought to you by [the Computer Security Lab at UC Santa Barbara](https://seclab.cs.ucsb.edu), [SEFCOM at Arizona State University](https://sefcom.asu.edu),  their associated CTF team, [Shellphish](https://shellphish.net), the open source community, and **[@rhelmot](https://github.com/rhelmot)**.
+It is brought to you by [the Computer Security Lab at UC Santa Barbara](https://seclab.cs.ucsb.edu), [SEFCOM at Arizona State University](https://sefcom.asu.edu), their associated CTF team, [Shellphish](https://shellphish.net), the open source community, and **[@rhelmot](https://github.com/rhelmot)**.
 
-# What?
+## Project Links
+Homepage: https://angr.io
+
+Project repository: https://github.com/angr/angr
+
+Documentation: https://docs.angr.io
+
+API Documentation: https://api.angr.io/en/latest/
+
+## What is angr?
 
 angr is a suite of Python 3 libraries that let you load a binary and do a lot of cool things to it:
 
@@ -27,7 +33,7 @@ The most common angr operation is loading a binary: `p = angr.Project('/bin/bash
 
 The short version of "how to install angr" is `mkvirtualenv --python=$(which python3) angr && python -m pip install angr`.
 
-# Example
+## Example
 
 angr does a lot of binary analysis stuff.
 To get you started, here's a simple example of using symbolic execution to get a flag in a CTF challenge.

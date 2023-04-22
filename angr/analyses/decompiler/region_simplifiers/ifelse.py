@@ -2,8 +2,15 @@
 import ailment
 
 from ..sequence_walker import SequenceWalker
-from ..structuring.structurer_nodes import SequenceNode, CodeNode, MultiNode, LoopNode, ConditionNode, \
-    EmptyBlockNotice, CascadingConditionNode
+from ..structuring.structurer_nodes import (
+    SequenceNode,
+    CodeNode,
+    MultiNode,
+    LoopNode,
+    ConditionNode,
+    EmptyBlockNotice,
+    CascadingConditionNode,
+)
 from ..condition_processor import ConditionProcessor
 from ..utils import insert_node
 
@@ -13,6 +20,7 @@ class IfElseFlattener(SequenceWalker):
     Remove unnecessary else branches and make the else node a direct successor of the previous If node if the If node
     always returns.
     """
+
     def __init__(self, node, functions):
         handlers = {
             SequenceNode: self._handle_Sequence,
@@ -28,7 +36,6 @@ class IfElseFlattener(SequenceWalker):
         self.walk(node)
 
     def _handle_Condition(self, node: ConditionNode, parent=None, index=None, **kwargs):
-
         if node.true_node is not None:
             self._handle(node.true_node, parent=node, index=0)
         if node.false_node is not None:
@@ -39,9 +46,11 @@ class IfElseFlattener(SequenceWalker):
                 last_stmts = ConditionProcessor.get_last_statements(node.true_node)
             except EmptyBlockNotice:
                 last_stmts = None
-            if last_stmts is not None \
-                    and None not in last_stmts \
-                    and all(self._is_statement_terminating(stmt) for stmt in last_stmts):
+            if (
+                last_stmts is not None
+                and None not in last_stmts
+                and all(self._is_statement_terminating(stmt) for stmt in last_stmts)
+            ):
                 # all end points in the true node are returning
 
                 # remove the else node and make it a new node following node
@@ -50,19 +59,21 @@ class IfElseFlattener(SequenceWalker):
                 insert_node(parent, "after", else_node, index, **kwargs)
 
     def _handle_CascadingCondition(self, node: CascadingConditionNode, parent=None, index=None, **kwargs):
-
         super()._handle_CascadingCondition(node, parent=parent, index=index, **kwargs)
 
         if node.else_node is not None:
-            last_stmts = [ ]
+            last_stmts = []
             for _, subnode in node.condition_and_nodes:
                 try:
                     last_stmts.extend(ConditionProcessor.get_last_statements(subnode))
                 except EmptyBlockNotice:
                     last_stmts.append(None)
 
-            if last_stmts and None not in last_stmts \
-                    and all(self._is_statement_terminating(stmt) for stmt in last_stmts):
+            if (
+                last_stmts
+                and None not in last_stmts
+                and all(self._is_statement_terminating(stmt) for stmt in last_stmts)
+            ):
                 # all end points in the true node are returning
 
                 # remove the else node and make it a new node following node
@@ -71,7 +82,6 @@ class IfElseFlattener(SequenceWalker):
                 insert_node(parent, "after", else_node, index, **kwargs)
 
     def _is_statement_terminating(self, stmt):
-
         if isinstance(stmt, ailment.Stmt.Return):
             return True
         if isinstance(stmt, ailment.Stmt.Call) and isinstance(stmt.target, ailment.Expr.Const):

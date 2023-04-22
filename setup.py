@@ -1,5 +1,6 @@
 # pylint: disable=missing-class-docstring
 import glob
+import importlib
 import os
 import platform
 import shutil
@@ -23,12 +24,12 @@ else:
 
 def _build_native():
     try:
-        import pyvex  # pylint:disable=unused-import,import-outside-toplevel
+        importlib.import_module("pyvex")
     except ImportError as e:
         raise LibError("You must install pyvex before building angr") from e
 
     try:
-        import unicorn  # pylint:disable=unused-import,import-outside-toplevel
+        importlib.import_module("unicorn")
     except ImportError as e:
         raise LibError("You must install unicorn before building angr") from e
 
@@ -120,13 +121,13 @@ except ModuleNotFoundError:
     pass
 
 
-if 'bdist_wheel' in sys.argv and '--plat-name' not in sys.argv:
-    sys.argv.append('--plat-name')
+if "bdist_wheel" in sys.argv and "--plat-name" not in sys.argv:
+    sys.argv.append("--plat-name")
     name = get_platform()
-    if 'linux' in name:
-        sys.argv.append('manylinux2014_' + platform.machine())
+    if "linux" in name:
+        sys.argv.append("manylinux2014_" + platform.machine())
     else:
         # https://www.python.org/dev/peps/pep-0425/
-        sys.argv.append(name.replace('.', '_').replace('-', '_'))
+        sys.argv.append(name.replace(".", "_").replace("-", "_"))
 
 setup(cmdclass=cmdclass)

@@ -20,13 +20,13 @@ class TypeTranslator:
     """
     Translate type variables to SimType equivalence.
     """
-    def __init__(self, arch=None):
 
+    def __init__(self, arch=None):
         self.arch = arch
 
-        self.translated: Dict[TypeConstant,SimType] = { }
-        self.translated_simtypes: Dict[SimType,TypeConstant] = { }
-        self.structs = { }
+        self.translated: Dict[TypeConstant, SimType] = {}
+        self.translated_simtypes: Dict[SimType, TypeConstant] = {}
+        self.structs = {}
         self._struct_ctr = count()
 
         # will be updated every time .translate() is called
@@ -37,7 +37,6 @@ class TypeTranslator:
     #
 
     def struct_name(self):
-
         return "struct_%d" % next(self._struct_ctr)
 
     #
@@ -45,12 +44,10 @@ class TypeTranslator:
     #
 
     def tc2simtype(self, tc):
-
         self._has_nonexistent_ref = False
         return self._tc2simtype(tc), self._has_nonexistent_ref
 
     def _tc2simtype(self, tc):
-
         if tc is None:
             return sim_type.SimTypeBottom().with_arch(self.arch)
 
@@ -79,7 +76,6 @@ class TypeTranslator:
     #
 
     def _translate_Pointer64(self, tc):
-
         if isinstance(tc.basetype, typeconsts.BottomType):
             # void *
             internal = sim_type.SimTypeBottom(label="void").with_arch(self.arch)
@@ -88,7 +84,6 @@ class TypeTranslator:
         return sim_type.SimTypePointer(internal).with_arch(self.arch)
 
     def _translate_Pointer32(self, tc):
-
         if isinstance(tc.basetype, typeconsts.BottomType):
             # void *
             internal = sim_type.SimTypeBottom(label="void").with_arch(self.arch)
@@ -101,7 +96,6 @@ class TypeTranslator:
         return sim_type.SimTypeArray(elem_type, length=tc.count).with_arch(self.arch)
 
     def _translate_Struct(self, tc):
-
         if tc in self.structs:
             return self.structs[tc]
 
@@ -148,7 +142,6 @@ class TypeTranslator:
         return sim_type.SimTypeNum(128, signed=False).with_arch(self.arch)
 
     def _translate_TypeVariableReference(self, tc):
-
         if tc.typevar in self.translated:
             return self.translated[tc.typevar]
 
@@ -171,7 +164,7 @@ class TypeTranslator:
             self.backpatch(st.pts_to, translated)
 
         elif isinstance(st, sim_type.SimStruct):
-            fields_patch = { }
+            fields_patch = {}
             for offset, fld in st.fields.items():
                 if isinstance(fld, SimTypeTempRef) and fld.typevar in translated:
                     fields_patch[offset] = translated[fld.typevar]
@@ -194,7 +187,7 @@ class TypeTranslator:
         return typeconsts.Int8()
 
     def _translate_SimStruct(self, st: sim_type.SimStruct) -> typeconsts.Struct:
-        fields = { }
+        fields = {}
         offsets = st.offsets
         for name, ty in st.fields.items():
             offset = offsets[name]
@@ -207,8 +200,9 @@ class TypeTranslator:
         array_tc = typeconsts.Array(elem_type, count=st.length)
         return array_tc
 
-    def _translate_SimTypePointer(self,
-                                  st: sim_type.SimTypePointer) -> Union[typeconsts.Pointer32, typeconsts.Pointer64]:
+    def _translate_SimTypePointer(
+        self, st: sim_type.SimTypePointer
+    ) -> Union[typeconsts.Pointer32, typeconsts.Pointer64]:
         base = self._simtype2tc(st.pts_to)
         if self.arch.bits == 32:
             return typeconsts.Pointer32(base)

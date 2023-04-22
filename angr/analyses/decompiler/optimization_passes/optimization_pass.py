@@ -16,19 +16,30 @@ class MultipleBlocksException(Exception):
     An exception that is raised in _get_block() where multiple blocks satisfy the criteria but only one block was
     requested.
     """
+
     pass
 
 
 class OptimizationPassStage(Enum):
     """
     Enums about optimization pass stages.
+
+    Note that the region identification pass (RegionIdentifier) may modify existing AIL blocks *without updating the
+    topology of the original AIL graph*. For example, loop successor refinement may modify create a new AIL block with
+    an artificial address, and alter existing jump targets of jump statements and conditional jump statements to point
+    to this new block. However, loop successor refinement does not update the topology of the original AIL graph, which
+    means this new AIL block does not exist in the original AIL graph. As a result, until this behavior of
+    RegionIdentifier changes in the future, DURING_REGION_IDENTIFICATION optimization passes should not modify existing
+    jump targets.
     """
+
     AFTER_AIL_GRAPH_CREATION = 0
     AFTER_SINGLE_BLOCK_SIMPLIFICATION = 1
     AFTER_GLOBAL_SIMPLIFICATION = 2
     AFTER_VARIABLE_RECOVERY = 3
-    DURING_REGION_IDENTIFICATION = 4
-    AFTER_STRUCTURING = 5
+    BEFORE_REGION_IDENTIFICATION = 4
+    DURING_REGION_IDENTIFICATION = 5
+    AFTER_STRUCTURING = 6
 
 
 class BaseOptimizationPass:
@@ -36,12 +47,15 @@ class BaseOptimizationPass:
     The base class for any optimization pass.
     """
 
-    ARCHES = [ ]  # strings of supported architectures
-    PLATFORMS = [ ]  # strings of supported platforms. Can be one of the following: "win32", "linux"
+    ARCHES = []  # strings of supported architectures
+    PLATFORMS = []  # strings of supported platforms. Can be one of the following: "win32", "linux"
     STAGE: int = None  # Specifies when this optimization pass should be executed
+    STRUCTURING: Optional[
+        str
+    ] = None  # specifies if this optimization pass is specific to a certain structuring algorithm
 
     def __init__(self, func):
-        self._func: 'Function' = func
+        self._func: "Function" = func
 
     @property
     def project(self):
@@ -52,7 +66,6 @@ class BaseOptimizationPass:
         return self.project.kb
 
     def analyze(self):
-
         ret, cache = self._check()
         if ret:
             self._analyze(cache=cache)
@@ -82,12 +95,21 @@ class OptimizationPass(BaseOptimizationPass):
     The base class for any function-level graph optimization pass.
     """
 
-    def __init__(self, func, blocks_by_addr=None, blocks_by_addr_and_idx=None, graph=None, variable_kb=None,
-                 region_identifier=None, reaching_definitions=None, **kwargs):
+    def __init__(
+        self,
+        func,
+        blocks_by_addr=None,
+        blocks_by_addr_and_idx=None,
+        graph=None,
+        variable_kb=None,
+        region_identifier=None,
+        reaching_definitions=None,
+        **kwargs,
+    ):
         super().__init__(func)
         # self._blocks is just a cache
-        self._blocks_by_addr: Dict[int,Set[ailment.Block]] = blocks_by_addr
-        self._blocks_by_addr_and_idx: Dict[Tuple[int,Optional[int]],ailment.Block] = blocks_by_addr_and_idx
+        self._blocks_by_addr: Dict[int, Set[ailment.Block]] = blocks_by_addr
+        self._blocks_by_addr_and_idx: Dict[Tuple[int, Optional[int]], ailment.Block] = blocks_by_addr_and_idx
         self._graph: Optional[networkx.DiGraph] = graph
         self._variable_kb = variable_kb
         self._ri = region_identifier
@@ -97,11 +119,11 @@ class OptimizationPass(BaseOptimizationPass):
         self.out_graph: Optional[networkx.DiGraph] = None
 
     @property
-    def blocks_by_addr(self) -> Dict[int,Set[ailment.Block]]:
+    def blocks_by_addr(self) -> Dict[int, Set[ailment.Block]]:
         return self._blocks_by_addr
 
     @property
-    def blocks_by_addr_and_idx(self) -> Dict[Tuple[int,Optional[int]],ailment.Block]:
+    def blocks_by_addr_and_idx(self) -> Dict[Tuple[int, Optional[int]], ailment.Block]:
         return self._blocks_by_addr_and_idx
 
     #
@@ -109,23 +131,22 @@ class OptimizationPass(BaseOptimizationPass):
     #
 
     def _get_block(self, addr, idx=None) -> Optional[ailment.Block]:
-
         if not self._blocks_by_addr:
             return None
         else:
             if idx is None:
                 blocks = self._blocks_by_addr.get(addr, None)
             else:
-                blocks = [ self._blocks_by_addr_and_idx.get((addr, idx), None) ]
+                blocks = [self._blocks_by_addr_and_idx.get((addr, idx), None)]
             if not blocks:
                 return None
             if len(blocks) == 1:
                 return next(iter(blocks))
-            raise MultipleBlocksException("There are %d blocks at address %#x.%s but only one is requested." % (
-                len(blocks), addr, idx
-            ))
+            raise MultipleBlocksException(
+                "There are %d blocks at address %#x.%s but only one is requested." % (len(blocks), addr, idx)
+            )
 
-    def _get_blocks(self, addr, idx=None) -> Generator[ailment.Block,None,None]:
+    def _get_blocks(self, addr, idx=None) -> Generator[ailment.Block, None, None]:
         if not self._blocks_by_addr:
             return
         else:
@@ -139,7 +160,6 @@ class OptimizationPass(BaseOptimizationPass):
                     yield block
 
     def _update_block(self, old_block, new_block):
-
         if self.out_graph is None:
             self.out_graph = self._graph  # we do not make copy here for performance reasons. we can change it if needed
 
@@ -165,7 +185,6 @@ class OptimizationPass(BaseOptimizationPass):
             self.out_graph.add_edge(new_block, dst, **data)
 
     def _remove_block(self, block):
-
         if self.out_graph is None:
             self.out_graph = self._graph
 
@@ -190,8 +209,8 @@ class SequenceOptimizationPass(BaseOptimizationPass):
     The base class for any sequence node optimization pass.
     """
 
-    ARCHES = [ ]  # strings of supported architectures
-    PLATFORMS = [ ]  # strings of supported platforms. Can be one of the following: "win32", "linux"
+    ARCHES = []  # strings of supported architectures
+    PLATFORMS = []  # strings of supported platforms. Can be one of the following: "win32", "linux"
     STAGE: int = None  # Specifies when this optimization pass should be executed
 
     def __init__(self, func, seq=None, **kwargs):

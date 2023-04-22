@@ -1,18 +1,18 @@
 # pylint:disable=unused-argument
-from typing import TYPE_CHECKING
+from typing import Dict, Set, TYPE_CHECKING
 
 import claripy
 import pyvex
 from archinfo.arch_arm import is_arm_arch
 
 from ...errors import SimMemoryMissingError
-from ...calling_conventions import SimRegArg, SimStackArg
+from ...calling_conventions import SimRegArg, SimStackArg, DefaultCC
 from ...engines.vex.claripy.datalayer import value as claripy_value
 from ...engines.light import SimEngineLightVEXMixin
-from ..typehoon import typevars, typeconsts
-from .engine_base import SimEngineVRBase, RichR
 from ...knowledge_plugins import Function
 from ...storage.memory_mixins.paged_memory.pages.multi_values import MultiValues
+from ..typehoon import typevars, typeconsts
+from .engine_base import SimEngineVRBase, RichR
 
 if TYPE_CHECKING:
     from .variable_recovery_base import VariableRecoveryStateBase
@@ -25,14 +25,51 @@ class SimEngineVRVEX(
     """
     Implements the VEX engine for variable recovery analysis.
     """
-    state: 'VariableRecoveryStateBase'
+
+    state: "VariableRecoveryStateBase"
 
     def __init__(self, *args, call_info=None, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.call_info = call_info or {}
 
+        # the following variables are for narrowing argument-passing register on 64-bit architectures. they are
+        # initialized before processing each block.
+        self.tmps_with_64bit_regs: Set[int] = set()  # tmps that store 64-bit register values
+        self.tmps_converted_to_32bit: Set[int] = set()  # tmps that store the 64-to-32-bit converted values
+        self.tmps_assignment_stmtidx: Dict[int, int] = {}  # statement IDs for the assignment of each tmp
+
     # Statement handlers
+
+    def _process_Stmt(self, whitelist=None):
+        self.tmps_with_64bit_regs = set()
+        self.tmps_assignment_stmtidx = {}
+        self.tmps_converted_to_32bit = set()
+
+        super()._process_Stmt(whitelist=whitelist)
+
+        # detect variables that can be narrowed from 64 bits to 32 bits
+        varman = self.state.variable_manager[self.func_addr]
+        vars_to_narrow = set()
+        for tmp_to_lower in self.tmps_converted_to_32bit:
+            existing_vars = varman.find_variables_by_stmt(
+                self.block.addr, self.tmps_assignment_stmtidx[tmp_to_lower], "register"
+            )
+            if len(existing_vars) != 1:
+                continue
+            existing_var = existing_vars[0][0]
+            if existing_var.size == 8:
+                vars_to_narrow.add(existing_var)
+
+        for var_to_lower in vars_to_narrow:
+            var_to_lower.size = 4
+
+    def _handle_WrTmp(self, stmt):
+        if isinstance(stmt.data, pyvex.IRExpr.Get) and stmt.data.result_size(self.tyenv) == 64:
+            self.tmps_with_64bit_regs.add(stmt.tmp)
+        self.tmps_assignment_stmtidx[stmt.tmp] = self.stmt_idx
+
+        super()._handle_WrTmp(stmt)
 
     def _handle_Put(self, stmt):
         offset = stmt.offset
@@ -53,7 +90,6 @@ class SimEngineVRVEX(
     def _handle_StoreG(self, stmt):
         guard = self._expr(stmt.guard)
         if guard is True:
-
             addr = self._expr(stmt.addr)
             size = stmt.data.result_size(self.tyenv) // 8
             data = self._expr(stmt.data)
@@ -108,6 +144,12 @@ class SimEngineVRVEX(
             return RichR(self.state.top(bits))
         return r
 
+    def _handle_RdTmp(self, expr):
+        if expr.tmp in self.tmps_converted_to_32bit:
+            self.tmps_converted_to_32bit.remove(expr.tmp)
+
+        return super()._handle_RdTmp(expr)
+
     def _handle_Get(self, expr):
         reg_offset = expr.offset
         reg_size = expr.result_size(self.tyenv) // 8
@@ -142,6 +184,15 @@ class SimEngineVRVEX(
         return RichR(self.state.top(expr.result_size(self.tyenv)))
 
     def _handle_Conversion(self, expr: pyvex.IRExpr.Unop) -> RichR:
+        _ = self._expr(expr.args[0])
+
+        if expr.op == "Iop_64to32" and isinstance(expr.args[0], pyvex.IRExpr.RdTmp):
+            # special handling for t11 = GET:I64(rdi); t4 = 64to32(t11) style of code in x86-64 (and other 64-bit
+            # architectures as well)
+            tmp_src = expr.args[0].tmp
+            if tmp_src in self.tmps_with_64bit_regs:
+                self.tmps_converted_to_32bit.add(tmp_src)
+
         return RichR(self.state.top(expr.result_size(self.tyenv)))
 
     # Function handlers
@@ -166,13 +217,35 @@ class SimEngineVRVEX(
                             self._load(addr, loc.size)
 
     def _process_block_end(self):
+        # handles block-end calls
         current_addr = self.state.block_addr
         for target_func in self.call_info.get(current_addr, []):
             self._handle_function_concrete(target_func)
 
+        # handles return statements
+        if self.block.vex.jumpkind == "Ijk_Ret":
+            # determine the size of the return register
+            # TODO: Handle multiple return registers
+            cc = self.state.function.calling_convention
+            if cc is None:
+                cc = DefaultCC[self.arch.name](self.arch)
+            if isinstance(cc.RETURN_VAL, SimRegArg):
+                ret_val_size = 0
+                reg_offset = cc.RETURN_VAL.check_offset(self.arch)
+                for i in range(cc.RETURN_VAL.size):
+                    try:
+                        _ = self.state.register_region.load(reg_offset + i, 1)
+                        ret_val_size = i + 1
+                    except SimMemoryMissingError:
+                        break
+                self.state.ret_val_size = (
+                    ret_val_size if self.state.ret_val_size is None else max(self.state.ret_val_size, ret_val_size)
+                )
+
     def _handle_Const(self, expr):
-        return RichR(claripy_value(expr.con.type, expr.con.value, size=expr.con.size),
-                     typevar=typeconsts.int_type(expr.con.size))
+        return RichR(
+            claripy_value(expr.con.type, expr.con.value, size=expr.con.size), typevar=typeconsts.int_type(expr.con.size)
+        )
 
     def _handle_Add(self, expr):
         arg0, arg1 = expr.args
@@ -182,19 +255,18 @@ class SimEngineVRVEX(
         result_size = expr.result_size(self.tyenv)
         if r0.data.concrete and r1.data.concrete:
             # constants
-            return RichR(r0.data + r1.data,
-                         typevar=typeconsts.int_type(result_size),
-                         type_constraints=None)
+            return RichR(r0.data + r1.data, typevar=typeconsts.int_type(result_size), type_constraints=None)
 
         typevar = None
         if r0.typevar is not None and r1.data.concrete:
             typevar = typevars.DerivedTypeVariable(r0.typevar, typevars.AddN(r1.data._model_concrete.value))
 
         sum_ = r0.data + r1.data
-        return RichR(sum_,
-                     typevar=typevar,
-                     type_constraints={ typevars.Subtype(r0.typevar, r1.typevar) },
-                     )
+        return RichR(
+            sum_,
+            typevar=typevar,
+            type_constraints={typevars.Subtype(r0.typevar, r1.typevar)},
+        )
 
     def _handle_Sub(self, expr):
         arg0, arg1 = expr.args
@@ -204,18 +276,17 @@ class SimEngineVRVEX(
         result_size = expr.result_size(self.tyenv)
         if r0.data.concrete and r1.data.concrete:
             # constants
-            return RichR(r0.data - r1.data,
-                         typevar=typeconsts.int_type(result_size),
-                         type_constraints=None)
+            return RichR(r0.data - r1.data, typevar=typeconsts.int_type(result_size), type_constraints=None)
 
         typevar = None
         if r0.typevar is not None and r1.data.concrete:
             typevar = typevars.DerivedTypeVariable(r0.typevar, typevars.SubN(r1.data._model_concrete.value))
 
         diff = r0.data - r1.data
-        return RichR(diff,
-                     typevar=typevar,
-                     )
+        return RichR(
+            diff,
+            typevar=typevar,
+        )
 
     def _handle_And(self, expr):
         arg0, arg1 = expr.args
@@ -299,22 +370,22 @@ class SimEngineVRVEX(
                 from_size = r0.data.size()
                 to_size = r1.data.size()
                 if signed:
-                    quotient = (r0.data.SDiv(claripy.SignExt(from_size - to_size, r1.data)))
-                    remainder = (r0.data.SMod(claripy.SignExt(from_size - to_size, r1.data)))
+                    quotient = r0.data.SDiv(claripy.SignExt(from_size - to_size, r1.data))
+                    remainder = r0.data.SMod(claripy.SignExt(from_size - to_size, r1.data))
                     quotient_size = to_size
                     remainder_size = to_size
                     result = claripy.Concat(
                         claripy.Extract(remainder_size - 1, 0, remainder),
-                        claripy.Extract(quotient_size - 1, 0, quotient)
+                        claripy.Extract(quotient_size - 1, 0, quotient),
                     )
                 else:
-                    quotient = (r0.data // claripy.ZeroExt(from_size - to_size, r1.data))
-                    remainder = (r0.data % claripy.ZeroExt(from_size - to_size, r1.data))
+                    quotient = r0.data // claripy.ZeroExt(from_size - to_size, r1.data)
+                    remainder = r0.data % claripy.ZeroExt(from_size - to_size, r1.data)
                     quotient_size = to_size
                     remainder_size = to_size
                     result = claripy.Concat(
                         claripy.Extract(remainder_size - 1, 0, remainder),
-                        claripy.Extract(quotient_size - 1, 0, quotient)
+                        claripy.Extract(quotient_size - 1, 0, quotient),
                     )
 
                 return RichR(result)
@@ -348,14 +419,17 @@ class SimEngineVRVEX(
         result_size = expr.result_size(self.tyenv)
         if r0.data.concrete and r1.data.concrete:
             # constants
-            return RichR(claripy.LShR(r0.data, r1.data._model_concrete.value),
-                         typevar=typeconsts.int_type(result_size),
-                         type_constraints=None)
+            return RichR(
+                claripy.LShR(r0.data, r1.data._model_concrete.value),
+                typevar=typeconsts.int_type(result_size),
+                type_constraints=None,
+            )
 
         r = self.state.top(result_size)
-        return RichR(r,
-                     typevar=r0.typevar,
-                     )
+        return RichR(
+            r,
+            typevar=r0.typevar,
+        )
 
     def _handle_Sar(self, expr):
         arg0, arg1 = expr.args
@@ -365,14 +439,17 @@ class SimEngineVRVEX(
         result_size = expr.result_size(self.tyenv)
         if r0.data.concrete and r1.data.concrete:
             # constants
-            return RichR(r0.data >> r1.data._model_concrete.value,
-                         typevar=typeconsts.int_type(result_size),
-                         type_constraints=None)
+            return RichR(
+                r0.data >> r1.data._model_concrete.value,
+                typevar=typeconsts.int_type(result_size),
+                type_constraints=None,
+            )
 
         r = self.state.top(result_size)
-        return RichR(r,
-                     typevar=r0.typevar,
-                     )
+        return RichR(
+            r,
+            typevar=r0.typevar,
+        )
 
     def _handle_Shl(self, expr):
         arg0, arg1 = expr.args
@@ -382,14 +459,17 @@ class SimEngineVRVEX(
         result_size = expr.result_size(self.tyenv)
         if r0.data.concrete and r1.data.concrete:
             # constants
-            return RichR(r0.data << r1.data._model_concrete.value,
-                         typevar=typeconsts.int_type(result_size),
-                         type_constraints=None)
+            return RichR(
+                r0.data << r1.data._model_concrete.value,
+                typevar=typeconsts.int_type(result_size),
+                type_constraints=None,
+            )
 
         r = self.state.top(result_size)
-        return RichR(r,
-                     typevar=r0.typevar,
-                     )
+        return RichR(
+            r,
+            typevar=r0.typevar,
+        )
 
     def _handle_CmpF(self, expr):
         return RichR(self.state.top(expr.result_size(self.tyenv)))

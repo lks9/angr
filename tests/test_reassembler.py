@@ -10,7 +10,7 @@ from common import has_32_bit_compiler_support
 import angr
 
 
-test_location = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', '..', 'binaries', 'tests')
+test_location = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "binaries", "tests")
 
 # Note: Reassembler is intensively tested by Patcherex test cases on CGC binaries.
 
@@ -18,12 +18,12 @@ test_location = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 
 def is_linux_x64():
     return sys.platform.startswith("linux") and platform.machine().endswith("64")
 
+
 def is_linux():
     return sys.platform.startswith("linux")
 
 
 def test_data_reference_collection_in_add():
-
     # Issue reported and test binary provided by Antonio F. Montoya
     # Fixed in https://github.com/angr/pyvex/pull/192
 
@@ -52,7 +52,6 @@ def test_data_reference_collection_in_add():
 
 
 def test_ln_gcc_O2():
-
     # Issue reported and test binary provided by Antonio F. Montoya
 
     p = angr.Project(os.path.join(test_location, "x86_64", "ln_gcc_-O2"), auto_load_libs=False)
@@ -75,17 +74,16 @@ def test_ln_gcc_O2():
         with open(asm_filepath, "w", encoding="ascii") as f:
             f.write(assembly)
         # Call out to GCC, and it should return 0. Otherwise check_call() will raise an exception.
-        subprocess.check_call(["gcc", "-no-pie", asm_filepath, "-o", bin_filepath],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.check_call(
+            ["gcc", "-no-pie", asm_filepath, "-o", bin_filepath], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
         # Run the generated binary file, and it should not crash (which is a pretty basic requirement, I know)
-        subprocess.check_call([bin_filepath, "--help"],
-                stdout=subprocess.DEVNULL)
+        subprocess.check_call([bin_filepath, "--help"], stdout=subprocess.DEVNULL)
         # Pick up after ourselves
         shutil.rmtree(tempdir)
 
 
 def test_chmod_gcc_O1():
-
     # Issue reported and test binary provided by Antonio F. Montoya
 
     p = angr.Project(os.path.join(test_location, "x86_64", "chmod_gcc_-O1"), auto_load_libs=False)
@@ -93,7 +91,6 @@ def test_chmod_gcc_O1():
     r.symbolize()
     r.remove_unnecessary_stuff()
     assembly = r.assembly(comments=True, symbolized=True)
-
 
     if is_linux_x64():
         # we should be able to compile it and run it ... if we are running on x64 Linux
@@ -105,17 +102,16 @@ def test_chmod_gcc_O1():
         with open(asm_filepath, "w", encoding="ascii") as f:
             f.write(assembly)
         # Call out to GCC, and it should return 0. Otherwise check_call() will raise an exception.
-        subprocess.check_call(["gcc", "-no-pie", asm_filepath, "-o", bin_filepath],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.check_call(
+            ["gcc", "-no-pie", asm_filepath, "-o", bin_filepath], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
         # Run the generated binary file, and it should not crash (which is a pretty basic requirement, I know)
-        subprocess.check_call([bin_filepath, "--help"],
-                stdout=subprocess.DEVNULL)
+        subprocess.check_call([bin_filepath, "--help"], stdout=subprocess.DEVNULL)
         # Pick up after ourselves
         shutil.rmtree(tempdir)
 
 
 def test_ex_gpp():
-
     # Issue reported and test binary provided by Antonio F. Montoya
 
     p = angr.Project(os.path.join(test_location, "x86_64", "ex_g++"), auto_load_libs=False)
@@ -134,8 +130,9 @@ def test_ex_gpp():
         with open(asm_filepath, "w", encoding="ascii") as f:
             f.write(assembly)
         # Call out to GCC, and it should return 0. Otherwise check_call() will raise an exception.
-        subprocess.check_call(["g++", "-no-pie", asm_filepath, "-o", bin_filepath],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.check_call(
+            ["g++", "-no-pie", asm_filepath, "-o", bin_filepath], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
         # Run the generated binary file and check the output
         output = subprocess.check_output([bin_filepath])
         assert output == b"A1\nA2\n"
@@ -144,7 +141,6 @@ def test_ex_gpp():
 
 
 def test_df_gcc_O1():
-
     # Issue reported and test binary provided by Antonio F. Montoya
 
     p = angr.Project(os.path.join(test_location, "x86_64", "df_gcc_-O1"), auto_load_libs=False)
@@ -163,17 +159,16 @@ def test_df_gcc_O1():
         with open(asm_filepath, "w", encoding="ascii") as f:
             f.write(assembly)
         # Call out to GCC, and it should return 0. Otherwise check_call() will raise an exception.
-        subprocess.check_call(["gcc", "-no-pie", asm_filepath, "-o", bin_filepath],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.check_call(
+            ["gcc", "-no-pie", asm_filepath, "-o", bin_filepath], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
         # Run the generated binary file, and it should not crash (which is a pretty basic requirement, I know)
-        subprocess.check_call([bin_filepath, "--help"],
-                              stdout=subprocess.DEVNULL)
+        subprocess.check_call([bin_filepath, "--help"], stdout=subprocess.DEVNULL)
         # Pick up after ourselves
         shutil.rmtree(tempdir)
 
 
 def test_dir_gcc_O0():
-
     # Issue reported and test binary provided by Antonio F. Montoya
 
     p = angr.Project(os.path.join(test_location, "x86_64", "dir_gcc_-O0"), auto_load_libs=False)
@@ -192,19 +187,17 @@ def test_dir_gcc_O0():
         with open(asm_filepath, "w", encoding="ascii") as f:
             f.write(assembly)
         # Call out to GCC, and it should return 0. Otherwise check_call() will raise an exception.
-        subprocess.check_call(["gcc", "-no-pie", asm_filepath, "-o", bin_filepath],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.check_call(
+            ["gcc", "-no-pie", asm_filepath, "-o", bin_filepath], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
         # Run the generated binary file, and it should not crash (which is a pretty basic requirement, I know)
-        subprocess.check_call([bin_filepath, "--help"],
-                              stdout=subprocess.DEVNULL)
-        subprocess.check_call([bin_filepath, "-la", "/"],
-                              stdout=subprocess.DEVNULL)
+        subprocess.check_call([bin_filepath, "--help"], stdout=subprocess.DEVNULL)
+        subprocess.check_call([bin_filepath, "-la", "/"], stdout=subprocess.DEVNULL)
         # Pick up after ourselves
         shutil.rmtree(tempdir)
 
 
 def test_helloworld():
-
     # Reassembler complains about TYPE_OTHER symbols, which is because it's trying to classify bytes inside the ELF
     # header as pointers. We identify the ELF header in CFGFast to workaround this problem.
     # https://github.com/angr/angr/issues/1630
@@ -219,7 +212,6 @@ def test_helloworld():
 
 
 def test_helloworld_gcc9():
-
     # New versions of GCC changed the names of init and fini sections.
     # https://github.com/angr/patcherex/issues/39
 
@@ -239,8 +231,9 @@ def test_helloworld_gcc9():
         with open(asm_filepath, "w", encoding="ascii") as f:
             f.write(assembly)
         # Call out to GCC, and it should return 0. Otherwise check_call() will raise an exception.
-        subprocess.check_call(["gcc", "-no-pie", asm_filepath, "-o", bin_filepath],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.check_call(
+            ["gcc", "-no-pie", asm_filepath, "-o", bin_filepath], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
         # Run the generated binary file, and it should not crash
         subprocess.check_call([bin_filepath], stdout=subprocess.DEVNULL)
         # Pick up after ourselves
@@ -248,7 +241,6 @@ def test_helloworld_gcc9():
 
 
 def test_partial_pie_ls_x86():
-
     # https://github.com/angr/patcherex/issues/39
     # a GCC-generated X86 binary with a few functions somehow being PIE
 
@@ -268,18 +260,23 @@ def test_partial_pie_ls_x86():
         with open(asm_filepath, "w", encoding="ascii") as f:
             f.write(assembly)
         # Call out to GCC, and it should return 0. Otherwise check_call() will raise an exception.
-        subprocess.check_call(["gcc", "-m32", "-no-pie", asm_filepath, "-o", bin_filepath],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.check_call(
+            ["gcc", "-m32", "-no-pie", asm_filepath, "-o", bin_filepath],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         # Run the generated binary file, and it should not crash
         subprocess.check_call([bin_filepath], stdout=subprocess.DEVNULL)
         # We can also run it with "-h"
         o = subprocess.check_output([bin_filepath, "--version"])
-        assert o == b'ls (GNU coreutils) 8.30\n' \
-                    b'Copyright (C) 2018 Free Software Foundation, Inc.\n' \
-                    b'License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\n' \
-                    b'This is free software: you are free to change and redistribute it.\n' \
-                    b'There is NO WARRANTY, to the extent permitted by law.\n\n' \
-                    b'Written by Richard M. Stallman and David MacKenzie.\n'
+        assert (
+            o == b"ls (GNU coreutils) 8.30\n"
+            b"Copyright (C) 2018 Free Software Foundation, Inc.\n"
+            b"License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\n"
+            b"This is free software: you are free to change and redistribute it.\n"
+            b"There is NO WARRANTY, to the extent permitted by law.\n\n"
+            b"Written by Richard M. Stallman and David MacKenzie.\n"
+        )
         # Pick up after ourselves
         shutil.rmtree(tempdir)
 

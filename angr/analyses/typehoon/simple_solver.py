@@ -5,10 +5,33 @@ from typing import Union, Type, Callable
 
 import networkx
 
-from .typevars import Existence, Equivalence, Subtype, TypeVariable, DerivedTypeVariable, HasField, Add, ConvertTo, \
-    IsArray
-from .typeconsts import (BottomType, TopType, TypeConstant, Int, Int8, Int16, Int32, Int64, Pointer, Pointer32,
-                         Pointer64, Struct, int_type, TypeVariableReference)
+from .typevars import (
+    Existence,
+    Equivalence,
+    Subtype,
+    TypeVariable,
+    DerivedTypeVariable,
+    HasField,
+    Add,
+    ConvertTo,
+    IsArray,
+)
+from .typeconsts import (
+    BottomType,
+    TopType,
+    TypeConstant,
+    Int,
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Pointer,
+    Pointer32,
+    Pointer64,
+    Struct,
+    int_type,
+    TypeVariableReference,
+)
 
 # lattice for 64-bit binaries
 BASE_LATTICE_64 = networkx.DiGraph()
@@ -52,8 +75,8 @@ class SimpleSolver:
     """
     SimpleSolver is, literally, a simple, unification-based type constraint solver.
     """
-    def __init__(self, bits: int, constraints):
 
+    def __init__(self, bits: int, constraints):
         if bits not in (32, 64):
             raise ValueError("Pointer size %d is not supported. Expect 32 or 64." % bits)
 
@@ -64,7 +87,7 @@ class SimpleSolver:
         #
         # Solving state
         #
-        self._equivalence = { }
+        self._equivalence = {}
         self._lower_bounds = defaultdict(BottomType)
         self._upper_bounds = defaultdict(TopType)
         self._recursive_types = defaultdict(set)
@@ -91,8 +114,7 @@ class SimpleSolver:
         # pprint.pprint(self._upper_bounds)
 
     def determine(self):
-
-        solution = { }
+        solution = {}
 
         for v in self._lower_bounds:
             if isinstance(v, TypeVariable) and not isinstance(v, DerivedTypeVariable):
@@ -123,16 +145,15 @@ class SimpleSolver:
         return solution
 
     def _handle_equivalence(self):
-
         graph = networkx.Graph()
 
-        replacements = { }
+        replacements = {}
         constraints = set()
 
         # collect equivalence relations
         for constraint in self._constraints:
             if isinstance(constraint, Equivalence):
-                #| type_a == type_b
+                # | type_a == type_b
                 # we apply unification and removes one of them
                 ta, tb = constraint.type_a, constraint.type_b
                 if isinstance(ta, TypeConstant) and isinstance(tb, TypeVariable):
@@ -187,19 +208,23 @@ class SimpleSolver:
         new_constraints = set()
         for constraint in self._constraints:
             if isinstance(constraint, Add):
-                if isinstance(constraint.type_0, TypeVariable) \
-                        and not isinstance(constraint.type_0, DerivedTypeVariable) \
-                        and isinstance(constraint.type_r, TypeVariable) \
-                        and not isinstance(constraint.type_r, DerivedTypeVariable):
+                if (
+                    isinstance(constraint.type_0, TypeVariable)
+                    and not isinstance(constraint.type_0, DerivedTypeVariable)
+                    and isinstance(constraint.type_r, TypeVariable)
+                    and not isinstance(constraint.type_r, DerivedTypeVariable)
+                ):
                     new_constraints.add(Equivalence(constraint.type_0, constraint.type_r))
-                if isinstance(constraint.type_1, TypeVariable) \
-                        and not isinstance(constraint.type_1, DerivedTypeVariable) \
-                        and isinstance(constraint.type_r, TypeVariable) \
-                        and not isinstance(constraint.type_r, DerivedTypeVariable):
+                if (
+                    isinstance(constraint.type_1, TypeVariable)
+                    and not isinstance(constraint.type_1, DerivedTypeVariable)
+                    and isinstance(constraint.type_r, TypeVariable)
+                    and not isinstance(constraint.type_r, DerivedTypeVariable)
+                ):
                     new_constraints.add(Equivalence(constraint.type_1, constraint.type_r))
         return new_constraints
 
-    def _pointer_class(self) -> Union[Type[Pointer32],Type[Pointer64]]:
+    def _pointer_class(self) -> Union[Type[Pointer32], Type[Pointer64]]:
         if self.bits == 32:
             return Pointer32
         elif self.bits == 64:
@@ -207,7 +232,6 @@ class SimpleSolver:
         raise NotImplementedError("Unsupported bits %d" % self.bits)
 
     def _calculate_closure(self, constraints):
-
         ptr_class = self._pointer_class()
 
         # a mapping from type variables to all the variables which are {super,sub}types of them
@@ -229,8 +253,11 @@ class SimpleSolver:
                         if isinstance(v, TypeVariable):
                             subtypevars[v].add(
                                 ptr_class(
-                                    Struct(fields={constraint.type_.label.offset: int_type(constraint.type_.label.bits),
-                                                   })
+                                    Struct(
+                                        fields={
+                                            constraint.type_.label.offset: int_type(constraint.type_.label.bits),
+                                        }
+                                    )
                                 )
                             )
 
@@ -290,15 +317,12 @@ class SimpleSolver:
 
         for var in list(subtypevars.keys()):
             sts = subtypevars[var].copy()
-            if isinstance(var, DerivedTypeVariable) and \
-                    isinstance(var.label, HasField):
+            if isinstance(var, DerivedTypeVariable) and isinstance(var.label, HasField):
                 for subtype_var in sts:
                     if var.type_var.type_var == subtype_var:
-                        subtypevars[subtype_var].add(ptr_class(
-                            Struct({
-                                var.label.offset: TypeVariableReference(subtype_var)
-                            })
-                        ))
+                        subtypevars[subtype_var].add(
+                            ptr_class(Struct({var.label.offset: TypeVariableReference(subtype_var)}))
+                        )
                         self._recursive_types[subtype_var].add(var.label.offset)
 
     def _get_lower_bound(self, v):
@@ -328,7 +352,6 @@ class SimpleSolver:
         return self._upper_bounds[v]
 
     def _compute_lower_upper_bounds(self, subtypevars, supertypevars):
-
         # compute the least upper bound for each type variable
         for typevar, upper_bounds in supertypevars.items():
             if typevar is None:
@@ -369,26 +392,26 @@ class SimpleSolver:
                 if not isinstance(subtypevar, TypeVariable):
                     continue
                 subtype_infimum = self._lower_bounds[subtypevar]
-                if isinstance(subtype_infimum, Pointer) and \
-                        isinstance(subtype_infimum.basetype, Struct):
+                if isinstance(subtype_infimum, Pointer) and isinstance(subtype_infimum.basetype, Struct):
                     subtype_infimum = self._join(subtypevar, typevar, translate=self._get_lower_bound)
                     self._lower_bounds[subtypevar] = subtype_infimum
 
     def _lower_struct_fields(self):
-
         # tv_680: ptr32(struct{0: int32})
         # tv_680.load.<32>@0: ptr32(struct{5: int8})
         #    becomes
         # tv_680: ptr32(struct{0: ptr32(struct{5: int8})})
 
         for outer, outer_lb in self._lower_bounds.items():
-            if isinstance(outer, DerivedTypeVariable) and isinstance(outer.label, HasField) \
-                    and not isinstance(outer_lb, BottomType):
+            if (
+                isinstance(outer, DerivedTypeVariable)
+                and isinstance(outer.label, HasField)
+                and not isinstance(outer_lb, BottomType)
+            ):
                 # unpack v
                 base = outer.type_var.type_var
 
                 if base in self._lower_bounds:
-
                     base_lb = self._lower_bounds[base]
 
                     # make sure it's a pointer at the offset that v.label specifies
@@ -400,8 +423,9 @@ class SimpleSolver:
                             if new_field != the_field:
                                 new_fields = base_lb.basetype.fields.copy()
                                 new_fields.update(
-                                    {outer.label.offset: new_field,
-                                     }
+                                    {
+                                        outer.label.offset: new_field,
+                                    }
                                 )
                                 base_lb = base_lb.__class__(Struct(new_fields))
                                 self._lower_bounds[base] = base_lb
@@ -410,7 +434,6 @@ class SimpleSolver:
                             if len(base_lb.basetype.fields) == 1 and 0 in base_lb.basetype.fields:
                                 base_lb = base_lb.__class__(base_lb.basetype.fields[0])
                                 self._lower_bounds[base] = base_lb
-
 
     def _convert_arrays(self, constraints):
         for constraint in constraints:
@@ -431,7 +454,6 @@ class SimpleSolver:
         return t.__class__
 
     def _concretize(self, n_cls, t1, t2, join_or_meet, translate):
-
         ptr_class = self._pointer_class()
 
         if n_cls is ptr_class:
@@ -448,7 +470,7 @@ class SimpleSolver:
 
         return n_cls()
 
-    def _join(self, *args, translate:Callable):
+    def _join(self, *args, translate: Callable):
         """
         Get the least upper bound (V, maximum) of the arguments.
         """
@@ -499,7 +521,7 @@ class SimpleSolver:
 
         # handling Struct
         if t1_cls is Struct and t2_cls is Struct:
-            fields = { }
+            fields = {}
             for offset in sorted(set(itertools.chain(t1.fields.keys(), t2.fields.keys()))):
                 if offset in t1.fields and offset in t2.fields:
                     v = self._join(t1.fields[offset], t2.fields[offset], translate=translate)
@@ -538,7 +560,7 @@ class SimpleSolver:
         # import ipdb; ipdb.set_trace()
         return TopType()
 
-    def _meet(self, *args, translate:Callable):
+    def _meet(self, *args, translate: Callable):
         """
         Get the greatest lower bound (^, minimum) of the arguments.
         """
@@ -589,7 +611,7 @@ class SimpleSolver:
 
         # handling Struct
         if t1_cls is Struct and t2_cls is Struct:
-            fields = { }
+            fields = {}
             for offset in sorted(set(itertools.chain(t1.fields.keys(), t2.fields.keys()))):
                 if offset in t1.fields and offset in t2.fields:
                     v = self._meet(t1.fields[offset], t2.fields[offset], translate=translate)

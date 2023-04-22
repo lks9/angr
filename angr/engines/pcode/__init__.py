@@ -1,2 +1,2 @@
 from .engine import HeavyPcodeMixin
-from .arch import ArchPcode
+from .cc import register_pcode_arch_default_cc

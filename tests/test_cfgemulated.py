@@ -13,9 +13,7 @@ from angr import options as o
 
 l = logging.getLogger("angr.tests.test_cfgemulated")
 
-test_location = os.path.join(
-    os.path.dirname(os.path.realpath(__file__)), "..", "..", "binaries", "tests"
-)
+test_location = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "binaries", "tests")
 
 
 # pylint: disable=missing-class-docstring
@@ -186,12 +184,8 @@ class TestCfgemulate(unittest.TestCase):
         # Make sure we are properly labeling functions that do not return in function manager
 
         binary_path = os.path.join(test_location, "x86_64", "not_returning")
-        proj = angr.Project(
-            binary_path, use_sim_procedures=True, load_options={"auto_load_libs": False}
-        )
-        cfg = proj.analyses.CFGEmulated(
-            context_sensitivity_level=0, fail_fast=True
-        )  # pylint:disable=unused-variable
+        proj = angr.Project(binary_path, use_sim_procedures=True, load_options={"auto_load_libs": False})
+        proj.analyses.CFGEmulated(context_sensitivity_level=0, fail_fast=True)  # pylint:disable=unused-variable
 
         # function_a returns
         assert proj.kb.functions.function(name="function_a") is not None
@@ -210,7 +204,7 @@ class TestCfgemulate(unittest.TestCase):
         assert not proj.kb.functions.function(name="main").returning
 
         # function_d should not be reachable
-        assert proj.kb.functions.function(name="function_d") == None
+        assert proj.kb.functions.function(name="function_d") is None
 
     @broken
     def test_cfg_5(self):
@@ -275,11 +269,8 @@ class TestCfgemulate(unittest.TestCase):
         # We need to add DO_CCALLS to resolve long jmp and support real mode
         o.modes["fastpath"] |= {o.DO_CCALLS}
         binary_path = test_location + "/i386/bios.bin.elf"
-        proj = angr.Project(binary_path,
-                            use_sim_procedures=True,
-                            page_size=1,
-                            auto_load_libs=False)
-        cfg = proj.analyses.CFGEmulated(context_sensitivity_level=1, fail_fast=True)  # pylint:disable=unused-variable
+        proj = angr.Project(binary_path, use_sim_procedures=True, page_size=1, auto_load_libs=False)
+        proj.analyses.CFGEmulated(context_sensitivity_level=1, fail_fast=True)  # pylint:disable=unused-variable
         assert {f for f in proj.kb.functions} >= set(function_addresses)
         o.modes["fastpath"] ^= {o.DO_CCALLS}
 
@@ -305,7 +296,7 @@ class TestCfgemulate(unittest.TestCase):
         # In thumb mode, all addresses of instructions and in function manager should be odd numbers, which loyally
         # reflect VEX's trick to encode the THUMB state in the address.
 
-        binary_path = os.path.join(test_location, 'armhf', 'test_arrays')
+        binary_path = os.path.join(test_location, "armhf", "test_arrays")
         p = angr.Project(binary_path, auto_load_libs=False)
         cfg = p.analyses.CFGEmulated(fail_fast=True)
 
@@ -329,7 +320,6 @@ class TestCfgemulate(unittest.TestCase):
                 check_addr(f.startpoint.addr)
 
     def test_fakeret_edges_0(self):
-
         # Test the bug where a fakeret edge can be missing in certain cases
         # Reported by Attila Axt (GitHub: @axt)
         # Ref: https://github.com/angr/angr/issues/72
@@ -378,7 +368,6 @@ class TestCfgemulate(unittest.TestCase):
         assert jumpkinds == {"Ijk_Call", "Ijk_FakeRet"}
 
     def test_string_references(self):
-
         # Test AttributeError on 'addr' which occurs when searching for string
         # references
 
@@ -393,7 +382,6 @@ class TestCfgemulate(unittest.TestCase):
         # test passes if hasn't thrown an exception
 
     def test_arrays(self):
-
         binary_path = os.path.join(test_location, "armhf", "test_arrays")
         b = angr.Project(binary_path, load_options={"auto_load_libs": False})
         cfg = b.analyses.CFGEmulated(fail_fast=True)
@@ -405,7 +393,6 @@ class TestCfgemulate(unittest.TestCase):
         assert len(successors) == 2
 
     def test_max_steps(self):
-
         binary_path = os.path.join(test_location, "x86_64", "fauxware")
         b = angr.Project(binary_path, load_options={"auto_load_libs": False})
         cfg = b.analyses.CFGEmulated(max_steps=5, fail_fast=True)
@@ -423,7 +410,6 @@ class TestCfgemulate(unittest.TestCase):
         assert max(depth_map.values()) <= 5
 
     def test_armel_final_missing_block(self):
-
         # Due to a stupid bug in CFGEmulated, the last block of a function might go missing in the function graph if the
         # only entry edge to that block is an Ijk_Ret edge. See #475 on GitHub.
         # Thank @gergo for reporting and providing this test binary.
@@ -438,20 +424,19 @@ class TestCfgemulate(unittest.TestCase):
         assert {block.addr for block in blocks} == {0x8000, 0x8014, 0x8020}
 
     def test_armel_final_missing_block_b(self):
-
         # When _pending_jobs is not sorted, it is possible that we first process a pending job created earlier and then
-        # process another pending job created later. Ideally, we hope that jobs are always processed in a topological order,
-        # and the unsorted pending jobs break this assumption. In this test binary, at one point there can be two pending
-        # jobs, 0x10b05/0x10ac5(Ijk_FakeRet) and 0x10bbe(Ijk_FakeRet). If 0x10bbe is processed before 0x10b05, we do not
-        # know whether the function 0x10a29(aes) returns or not. As a result, the final block of the main function is not
-        # confirmed, and is not added to the function graph of function main.
+        # process another pending job created later. Ideally, we hope that jobs are always processed in a topological
+        # order, and the unsorted pending jobs break this assumption. In this test binary, at one point there can be two
+        # pending jobs, 0x10b05/0x10ac5(Ijk_FakeRet) and 0x10bbe(Ijk_FakeRet). If 0x10bbe is processed before 0x10b05,
+        # we do not # know whether the function 0x10a29(aes) returns or not. As a result, the final block of the main
+        # function is not confirmed, and is not added to the function graph of function main.
         #
-        # In fact, this also hints a different bug. We should always "confirm" that a function returns if its FakeRet job
-        # are processed for whatever reason.
+        # In fact, this also hints a different bug. We should always "confirm" that a function returns if its FakeRet
+        # job are processed for whatever reason.
         #
-        # Fixing either bug will resolve the issue that the final block does not show up in the function graph of main. To
-        # stay on the safe side, both of them are fixed. Thanks @tyb0807 for reporting this issue and providing a test
-        # binary.
+        # Fixing either bug will resolve the issue that the final block does not show up in the function graph of main.
+        # To stay on the safe side, both of them are fixed. Thanks @tyb0807 for reporting this issue and providing a
+        # test binary.
         # EDG says: This binary is compiled incorrectly.
         # The binary's app code was compiled as CortexM, but linked against ARM libraries.
         # This is illegal, and does not actually execute on a real CortexM.
@@ -473,7 +458,6 @@ class TestCfgemulate(unittest.TestCase):
         assert {block.addr for block in blocks} == {0x10B79, 0x10BBF}
 
     def test_armel_incorrect_function_detection_caused_by_branch(self):
-
         # GitHub issue #685
         binary_path = os.path.join(test_location, "armel", "RTOSDemo.axf.issue_685")
         b = angr.Project(binary_path, auto_load_libs=False)
@@ -497,7 +481,6 @@ class TestCfgemulate(unittest.TestCase):
         assert block_addrs == [0x8009, 0x8011, 0x801F, 0x8027]
 
     def test_cfg_switches(self):
-
         # logging.getLogger('angr.analyses.cfg.cfg_fast').setLevel(logging.INFO)
         # logging.getLogger('angr.analyses.cfg.indirect_jump_resolvers.jumptable').setLevel(logging.DEBUG)
 
@@ -560,9 +543,7 @@ class TestCfgemulate(unittest.TestCase):
                     dst_node,
                 )
 
-    class CFGEmulatedAborted(
-        angr.analyses.cfg.cfg_emulated.CFGEmulated
-    ):  # pylint:disable=abstract-method
+    class CFGEmulatedAborted(angr.analyses.cfg.cfg_emulated.CFGEmulated):  # pylint:disable=abstract-method
         """
         Only used in the test_abort_and_resume test case.
         """
@@ -576,7 +557,6 @@ class TestCfgemulate(unittest.TestCase):
                 super()._intra_analysis()
 
     def test_abort_and_resume(self):
-
         angr.analyses.AnalysesHub.register_default("CFGEmulatedAborted", self.CFGEmulatedAborted)
 
         self.CFGEmulatedAborted.should_abort = False
@@ -632,10 +612,10 @@ class TestCfgemulate(unittest.TestCase):
                 dst_node,
             )
 
-        for (node_addr, final_states_number) in final_states_info.items():
+        for node_addr, final_states_number in final_states_info.items():
             node = target_function_cfg_emulated.get_any_node(node_addr)
             assert final_states_number == len(node.final_states), (
-                    "CFG node 0x%x has incorrect final states." % node_addr
+                "CFG node 0x%x has incorrect final states." % node_addr
             )
 
 

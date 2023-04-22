@@ -5,20 +5,20 @@
 #     - Fix default_exit_target
 #     - Fix/remove NotImplementedError's
 
-from collections import defaultdict
+import copy
 import logging
 from typing import Union, Optional, Iterable, Sequence, Tuple, List
 
 import archinfo
-from archinfo import ArchARM
+from archinfo import ArchARM, ArchPcode
 import pypcode
 import cle
 from cachetools import LRUCache
+
 # FIXME: Reusing these errors from pyvex for compatibility. Eventually these
 # should be refactored to use common error classes.
-from pyvex.errors import PyVEXError, SkipStatementsError, LiftingException, NeedStatementsNotification
+from pyvex.errors import PyVEXError, SkipStatementsError, LiftingException
 
-from .arch import ArchPcode
 from .behavior import BehaviorFactory
 from ..engine import SimEngineBase
 from ...state_plugins.inspect import BP_AFTER, BP_BEFORE
@@ -35,13 +35,14 @@ IRSB_MAX_INST = 99
 MAX_INSTRUCTIONS = 99999
 MAX_BYTES = 5000
 
-# This class exists to ease compatibility with CFGFast's processing of
-# exit_statements. See _scan_irsb method.
+
 class ExitStatement:
-    __slots__ = (
-        "dst",
-        "jumpkind"
-    )
+    """
+    This class exists to ease compatibility with CFGFast's processing of
+    exit_statements. See _scan_irsb method.
+    """
+
+    __slots__ = ("dst", "jumpkind")
 
     dst: Optional[int]
     jumpkind: str
@@ -124,13 +125,13 @@ class IRSB:
     _instruction_addresses: Sequence[int]
     _instructions: Sequence[pypcode.Translation]
     _size: Optional[int]
-    _statements: Iterable # Note: currently unused
+    _statements: Iterable  # Note: currently unused
     _disassembly: Optional[PcodeDisassemblerBlock]
     addr: int
     arch: archinfo.Arch
     behaviors: Optional[BehaviorFactory]
-    data_refs: Sequence # Note: currently unused
-    default_exit_target: Optional # Note: currently used
+    data_refs: Sequence  # Note: currently unused
+    default_exit_target: Optional  # Note: currently used
     jumpkind: Optional[str]
     next: Optional[int]
 
@@ -161,8 +162,10 @@ class IRSB:
         :param arch:                The architecture to lift the data as.
         :param max_inst:            The maximum number of instructions to lift. (See note below)
         :param max_bytes:           The maximum number of bytes to use.
-        :param num_inst:            Replaces max_inst if max_inst is None. If set to None as well, no instruction limit is used.
-        :param num_bytes:           Replaces max_bytes if max_bytes is None. If set to None as well, no  byte limit is used.
+        :param num_inst:            Replaces max_inst if max_inst is None. If set to None as well, no instruction limit
+                                    is used.
+        :param num_bytes:           Replaces max_bytes if max_bytes is None. If set to None as well, no  byte limit is
+                                    used.
         :param bytes_offset:        The offset into `data` to start lifting at. Note that for ARM THUMB mode, both
                                     `mem_addr` and `bytes_offset` must be odd (typically `bytes_offset` is set to 1).
         :param traceflags:          Unused by P-Code lifter
@@ -187,7 +190,7 @@ class IRSB:
         self._direct_next = None
         self._exit_statements = []
         self._instruction_addresses = ()
-        self._instructions: List['pypcode.Translation'] = []
+        self._instructions: List["pypcode.Translation"] = []
         self._size = None
         self._statements = []
         self.addr = mem_addr
@@ -224,7 +227,7 @@ class IRSB:
         addr: int,
         statements: Optional[Sequence] = None,
         nxt: Optional[int] = None,
-        tyenv = None, # Unused, kept for compatibility
+        tyenv=None,  # Unused, kept for compatibility
         jumpkind: Optional[str] = None,
         direct_next: Optional[bool] = None,
         size: Optional[int] = None,
@@ -242,15 +245,55 @@ class IRSB:
         return self._exit_statements
 
     def copy(self) -> "IRSB":
-        raise NotImplementedError()
-
-    def extend(self, extendwith: "IRSB") -> None:
         """
-        Appends an irsb to the current irsb. The irsb that is appended is invalidated. The appended irsb's jumpkind and
-        default exit are used.
+        Copy by creating an empty IRSB and then filling in the leftover
+        attributes. Copy is made as deep as possible
+        """
+        new = IRSB.empty_block(
+            arch=self.arch,
+            addr=self.addr,
+        )
+
+        new._set_attributes(
+            nxt=self.next,
+            jumpkind=self.jumpkind,
+            direct_next=self.direct_next,
+            # deepcopy call to 'pickle' fails.
+            # shallow copy should work since _instructions shouldn't mutate
+            instructions=copy.copy(self._instructions),
+            # statements = None, #unused
+            # instruction_addresses = None # computed
+            # tyenv = None # unused
+            # exit_statements = None # currently unused
+            # default_exit_target = None # currently unused
+            # size = None # computed
+        )
+
+        return new
+
+    def extend(self, extendwith: "IRSB") -> "IRSB":
+        """
+        Appends an irsb to the current irsb. The irsb that is appended is invalidated.
+        The appended irsb's jumpkind and default exit are used.
         :param extendwith: The IRSB to append to this IRSB
         """
-        raise NotImplementedError()
+        # see _set_attributes call in 'copy' def for notes on other attributes
+        self._set_attributes(
+            nxt=extendwith.next,
+            jumpkind=extendwith.jumpkind,
+            direct_next=extendwith.direct_next,
+            instructions=copy.copy(self._instructions),
+        )
+
+        # append instructions if new
+        addrs = self.instruction_addresses
+        newinsns = [insn for insn in extendwith._instructions if insn.address not in addrs]
+        self._instructions.extend(newinsns)
+
+        # reset disassem. now disassem will be recomputed if irsb.disassembly is called
+        self._disassembly = None
+
+        return self
 
     def invalidate_direct_next(self) -> None:
         self._direct_next = None
@@ -275,6 +318,11 @@ class IRSB:
     #
     # simple properties useful for analysis
     #
+
+    @property
+    def tyenv(self):
+        # FIXME: Here for compatibility. Remove.
+        return None
 
     @property
     def stmts_used(self) -> int:
@@ -319,7 +367,7 @@ class IRSB:
         """
         The size of this block, in bytes
         """
-        return sum([ins.length for ins in self._instructions])
+        return sum(ins.length for ins in self._instructions)
 
     @property
     def operations(self):
@@ -331,7 +379,8 @@ class IRSB:
     @property
     def all_constants(self):
         """
-        Returns all constants in the block (including incrementing of the program counter) as :class:`pyvex.const.IRConst`.
+        Returns all constants in the block (including incrementing of the program counter) as
+        :class:`pyvex.const.IRConst`.
         """
         raise NotImplementedError()
 
@@ -367,15 +416,12 @@ class IRSB:
         sa = []
         sa.append("IRSB {")
         for i, ins in enumerate(self._instructions):
-            sa.append(
-                "   %02d | ------ %08x, %d ------"
-                % (i, ins.address.offset, ins.length)
-            )
+            sa.append("   %02d | ------ %08x, %d ------" % (i, ins.address.offset, ins.length))
             for op in ins.ops:
                 sa.append("  +%02d | %s" % (op.seq.uniq, pypcode.PcodePrettyPrinter.fmt_op(op)))
 
         if isinstance(self.next, int):
-            next_str = '%x' % self.next
+            next_str = "%x" % self.next
         else:
             next_str = str(self.next)
         sa.append(f"   NEXT: {next_str}; {self.jumpkind}")
@@ -386,21 +432,15 @@ class IRSB:
         """
         Checks if the default of this IRSB a direct jump or not.
         """
-        if not (
-            self.jumpkind == "Ijk_InvalICache"
-            or self.jumpkind == "Ijk_Boring"
-            or self.jumpkind == "Ijk_Call"
-        ):
+        if self.jumpkind not in ("Ijk_InvalICache", "Ijk_Boring", "Ijk_Call"):
             return False
-
-        target = self.default_exit_target
-        return target is not None
+        return self.default_exit_target is not None
 
     def _set_attributes(
-        self,
+        self: "IRSB",
         statements: Iterable = None,
         nxt: Optional[int] = None,
-        tyenv = None, # Unused, kept for compatibility
+        tyenv=None,  # Unused, kept for compatibility
         jumpkind: Optional[str] = None,
         direct_next: Optional[bool] = None,
         size: Optional[int] = None,
@@ -438,7 +478,7 @@ class IRSB:
     def statements(self) -> Iterable:
         # FIXME: For compatibility, may want to implement Ist_IMark and
         # pyvex.IRStmt.Exit to ease analyses.
-        l.warning('Returning empty statements list!')
+        l.debug("Returning empty statements list!")
         return []
         # return self._statements
 
@@ -446,9 +486,10 @@ class IRSB:
     def disassembly(self) -> PcodeDisassemblerBlock:
         if self._disassembly is None:
             insns = [PcodeDisassemblerInsn(ins) for ins in self._instructions]
-            thumb = False # FIXME
+            thumb = False  # FIXME
             self._disassembly = PcodeDisassemblerBlock(self.addr, insns, thumb, self.arch)
         return self._disassembly
+
 
 class Lifter:
     """
@@ -532,7 +573,8 @@ class Lifter:
         :param data:                The bytes to lift as either a python string of bytes or a cffi buffer object.
         :param bytes_offset:        The offset into `data` to start lifting at.
         :param max_bytes:           The maximum number of bytes to lift. If set to None, no byte limit is used.
-        :param max_inst:            The maximum number of instructions to lift. If set to None, no instruction limit is used.
+        :param max_inst:            The maximum number of instructions to lift. If set to None, no instruction limit is
+                                    used.
         :param opt_level:           Unused by P-Code lifter
         :param traceflags:          Unused by P-Code lifter
         :param allow_arch_optimizations: Unused by P-Code lifter
@@ -568,6 +610,8 @@ class Lifter:
         """
         raise NotImplementedError()
 
+
+# pylint:disable=unused-argument
 def lift(
     data: Union[str, bytes, None],
     addr: int,
@@ -623,9 +667,7 @@ def lift(
         allow_arch_optimizations = False
     else:
         if max_bytes is None:
-            raise PyVEXError(
-                "Cannot lift block with ffi pointer and no size (max_bytes is None)"
-            )
+            raise PyVEXError("Cannot lift block with ffi pointer and no size (max_bytes is None)")
         # c_data = data
         # py_data = None
         allow_arch_optimizations = True
@@ -725,11 +767,7 @@ def lift(
             data_left = data + final_irsb.size
         if max_inst is not None:
             max_inst -= final_irsb.instructions
-        if (
-            (max_bytes is None or max_bytes > 0)
-            and (max_inst is None or max_inst > 0)
-            and data_left
-        ):
+        if (max_bytes is None or max_bytes > 0) and (max_inst is None or max_inst > 0) and data_left:
             more_irsb = lift(
                 data_left,
                 next_addr,
@@ -757,6 +795,9 @@ def lift(
 
 
 class PcodeBasicBlockLifter:
+    """
+    Lifts basic blocks to P-code
+    """
 
     context: pypcode.Context
     behaviors: BehaviorFactory
@@ -766,38 +807,37 @@ class PcodeBasicBlockLifter:
             langid = arch.name
         else:
             archinfo_to_lang_map = {
-                'X86':   'x86:LE:32:default',
-                'AMD64': 'x86:LE:64:default',
-                'AVR8':  'avr8:LE:16:atmega256',
+                "X86": "x86:LE:32:default",
+                "AMD64": "x86:LE:64:default",
+                "AVR8": "avr8:LE:16:atmega256",
             }
             if arch.name not in archinfo_to_lang_map:
-                l.error('Unknown mapping of %s to pcode languge id', arch.name)
+                l.error("Unknown mapping of %s to pcode languge id", arch.name)
                 raise NotImplementedError()
             langid = archinfo_to_lang_map[arch.name]
 
-        langs = {l.id:l
-            for a in pypcode.Arch.enumerate()
-                for l in a.languages}
+        langs = {l.id: l for a in pypcode.Arch.enumerate() for l in a.languages}
 
         lang = langs[langid]
 
         self.context = pypcode.Context(lang)
         self.behaviors = BehaviorFactory()
 
-    def lift(self,
-             irsb: IRSB,
-             baseaddr: int,
-             data: Union[bytes, bytearray],
-             bytes_offset: int = 0,
-             max_bytes: Optional[int] = None,
-             max_inst: Optional[int] = None) -> None:
-
+    def lift(
+        self,
+        irsb: IRSB,
+        baseaddr: int,
+        data: Union[bytes, bytearray],
+        bytes_offset: int = 0,
+        max_bytes: Optional[int] = None,
+        max_inst: Optional[int] = None,
+    ) -> None:
         if max_bytes is None or max_bytes > MAX_BYTES:
             max_bytes = min(len(data), MAX_BYTES)
         if max_inst is None or max_inst > MAX_INSTRUCTIONS:
             max_inst = MAX_INSTRUCTIONS
 
-        irsb.behaviors = self.behaviors # FIXME
+        irsb.behaviors = self.behaviors  # FIXME
 
         # Translate
         addr = baseaddr + bytes_offset
@@ -808,25 +848,23 @@ class PcodeBasicBlockLifter:
         next_block = None
         for insn in irsb._instructions:
             for op in insn.ops:
-                if (op.opcode in [pypcode.OpCode.BRANCH, pypcode.OpCode.CBRANCH]
-                    and op.inputs[0].get_addr().is_constant):
-                        l.warning('Block contains relative p-code jump at '
-                                  'instruction %#x:%d, which is not emulated '
-                                  'yet.', op.seq.pc.offset, op.seq.uniq)
+                if op.opcode in [pypcode.OpCode.BRANCH, pypcode.OpCode.CBRANCH] and op.inputs[0].get_addr().is_constant:
+                    # P-code relative branch (op.seq.pc.offset + op.seq.uniq + op.inputs[0].offset)
+                    continue
                 if op.opcode == pypcode.OpCode.CBRANCH:
-                    irsb._exit_statements.append((
-                        op.seq.pc.offset, op.seq.uniq,
-                        ExitStatement(op.inputs[0].offset, 'Ijk_Boring')))
+                    irsb._exit_statements.append(
+                        (op.seq.pc.offset, op.seq.uniq, ExitStatement(op.inputs[0].offset, "Ijk_Boring"))
+                    )
                 elif op.opcode == pypcode.OpCode.BRANCH:
-                    next_block = (op.inputs[0].offset, 'Ijk_Boring')
+                    next_block = (op.inputs[0].offset, "Ijk_Boring")
                 elif op.opcode == pypcode.OpCode.BRANCHIND:
-                    next_block = (None, 'Ijk_Boring')
+                    next_block = (None, "Ijk_Boring")
                 elif op.opcode == pypcode.OpCode.CALL:
-                    next_block = (op.inputs[0].offset, 'Ijk_Call')
+                    next_block = (op.inputs[0].offset, "Ijk_Call")
                 elif op.opcode == pypcode.OpCode.CALLIND:
-                    next_block = (None, 'Ijk_Call')
+                    next_block = (None, "Ijk_Call")
                 elif op.opcode == pypcode.OpCode.RETURN:
-                    next_block = (None, 'Ijk_Ret')
+                    next_block = (None, "Ijk_Ret")
 
         if len(irsb._instructions) > 0:
             last_insn = irsb._instructions[-1]
@@ -835,9 +873,9 @@ class PcodeBasicBlockLifter:
             fallthru_addr = addr
 
         if result.error:
-            next_block = (fallthru_addr, 'Ijk_NoDecode')
+            next_block = (fallthru_addr, "Ijk_NoDecode")
         elif next_block is None:
-            next_block = (fallthru_addr, 'Ijk_Boring')
+            next_block = (fallthru_addr, "Ijk_Boring")
 
         irsb.next, irsb.jumpkind = next_block
 
@@ -863,7 +901,7 @@ class PcodeLifter(Lifter):
         )
 
         if self.irsb.size == 0:
-            l.debug('raising lifting exception')
+            l.debug("raising lifting exception")
             raise LiftingException("pypcode: could not decode any instructions @ 0x%x" % self.addr)
 
 
@@ -878,17 +916,17 @@ class PcodeLifterEngineMixin(SimEngineBase):
         use_cache: Optional[bool] = None,
         cache_size: int = 50000,
         default_opt_level: int = 1,
-        support_selfmodifying_code: Optional[bool] = None,
+        selfmodifying_code: Optional[bool] = None,
         single_step: bool = False,
         default_strict_block_end: bool = False,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(project, **kwargs)
 
         self._use_cache = use_cache
         self._default_opt_level = default_opt_level
         self._cache_size = cache_size
-        self._support_selfmodifying_code = support_selfmodifying_code
+        self.selfmodifying_code = selfmodifying_code
         self._single_step = single_step
         self.default_strict_block_end = default_strict_block_end
 
@@ -897,13 +935,11 @@ class PcodeLifterEngineMixin(SimEngineBase):
                 self._use_cache = self.project._translation_cache
             else:
                 self._use_cache = False
-        if self._support_selfmodifying_code is None:
+        if self.selfmodifying_code is None:
             if self.project is not None:
-                self._support_selfmodifying_code = (
-                    self.project._support_selfmodifying_code
-                )
+                self.selfmodifying_code = self.project.selfmodifying_code
             else:
-                self._support_selfmodifying_code = False
+                self.selfmodifying_code = False
 
         # block cache
         self._block_cache = None
@@ -960,7 +996,8 @@ class PcodeLifterEngineMixin(SimEngineBase):
             skip_stmts,
             collect_data_refs,
             load_from_ro_regions,
-            cross_insn_opt)
+            cross_insn_opt,
+        )
 
     def lift_pcode(
         self,
@@ -1006,9 +1043,9 @@ class PcodeLifterEngineMixin(SimEngineBase):
         :param load_from_ro_regions: Unused by P-Code lifter
         """
         if cross_insn_opt:
-            l.debug('cross_insn_opt is ignored for p-code lifter')
+            l.debug("cross_insn_opt is ignored for p-code lifter")
         if load_from_ro_regions:
-            l.debug('load_from_ro_regions is ignored for p-code lifter')
+            l.debug("load_from_ro_regions is ignored for p-code lifter")
 
         # phase 0: sanity check
         if not state and not clemory and not insn_bytes:
@@ -1041,7 +1078,7 @@ class PcodeLifterEngineMixin(SimEngineBase):
                 opt_level = self._default_opt_level
         if strict_block_end is None:
             strict_block_end = self.default_strict_block_end
-        if self._support_selfmodifying_code:
+        if self.selfmodifying_code:
             if opt_level > 0:
                 if once("vex-engine-smc-opt-warning"):
                     l.warning(
@@ -1127,15 +1164,13 @@ class PcodeLifterEngineMixin(SimEngineBase):
 
         # vex_lift breakpoints only triggered when the cache isn't used
         if state:
-            state._inspect(
-                "vex_lift", BP_BEFORE, mem_read_address=addr, mem_read_length=size
-            )
+            state._inspect("vex_lift", BP_BEFORE, mem_read_address=addr, mem_read_length=size)
 
         # phase 4: get bytes
         if insn_bytes is not None:
             buff, size = insn_bytes, len(insn_bytes)
         else:
-            buff, size = self._load_bytes(addr, size, state, clemory)
+            buff, size, _ = self._load_bytes(addr, size, state, clemory)
 
         if not buff or size == 0:
             raise SimEngineError("No bytes in memory for block starting at %#x." % addr)
@@ -1186,23 +1221,21 @@ class PcodeLifterEngineMixin(SimEngineBase):
             #     l.debug("Using bytes: %r", pyvex.ffi.buffer(buff, size))
             raise SimTranslationError("Unable to translate bytecode") from e
 
-    def _load_bytes(self,
-        addr: int,
-        max_size: int,
-        state: Optional[SimState] = None,
-        clemory: Optional[cle.Clemory] = None) -> Tuple[bytes, int]:
+    def _load_bytes(
+        self, addr: int, max_size: int, state: Optional[SimState] = None, clemory: Optional[cle.Clemory] = None
+    ) -> Tuple[bytes, int, int]:
         if clemory is None and state is None:
-            raise SimEngineError('state and clemory cannot both be None in _load_bytes().')
+            raise SimEngineError("state and clemory cannot both be None in _load_bytes().")
 
-        buff, size = b"", 0
+        buff, size, offset = b"", 0, 0
 
         # Load from the clemory if we can
-        smc = self._support_selfmodifying_code
+        smc = self.selfmodifying_code
 
         # skip loading from the clemory if we're using the ultra page
         # TODO: is this a good change? it neuters lookback optimizations
         # we can try concrete loading the full page but that has drawbacks too...
-        #if state is not None and issubclass(getattr(state.memory, 'PAGE_TYPE', object), UltraPage):
+        # if state is not None and issubclass(getattr(state.memory, 'PAGE_TYPE', object), UltraPage):
         #    smc = True
 
         # when smc is not enabled or when state is not provided, we *always* attempt to load concrete data first
@@ -1216,17 +1249,13 @@ class PcodeLifterEngineMixin(SimEngineBase):
                     if start <= addr:
                         offset = addr - start
                         if isinstance(backer, (bytes, bytearray)):
-                            # buff = pyvex.ffi.from_buffer(backer) + offset
                             buff = backer[offset:]
                             size = len(backer) - offset
                         elif isinstance(backer, list):
-                            raise SimTranslationError("Cannot lift block for arch with strange byte width. If you think you ought to be able to, open an issue.")
-                            #buff_lst = backer[offset:offset+max_size]
-                            #if self.project is None:
-                            #    raise ValueError("You must set self.project if a list of integers are used as backers.")
-                            #byte_width = self.project.arch.byte_width
-                            #buff = claripy.Concat(*map(lambda v: claripy.BVV(v, byte_width), buff_lst))
-                            #size = len(buff_lst)
+                            raise SimTranslationError(
+                                "Cannot lift block for arch with strange byte width. If you think you ought to be able "
+                                "to, open an issue."
+                            )
                         else:
                             raise TypeError("Unsupported backer type %s." % type(backer))
             elif state:
@@ -1261,11 +1290,9 @@ class PcodeLifterEngineMixin(SimEngineBase):
                 size = len(buff)
 
         size = min(max_size, size)
-        return buff, size
+        return buff, size, offset
 
-    def _first_stoppoint(self,
-        irsb: IRSB,
-        extra_stop_points: Optional[Sequence[int]] = None) -> Optional[int]:
+    def _first_stoppoint(self, irsb: IRSB, extra_stop_points: Optional[Sequence[int]] = None) -> Optional[int]:
         """
         Enumerate the imarks in the block. If any of them (after the first one) are at a stop point, returns the address
         of the stop point. None is returned otherwise.
@@ -1279,12 +1306,10 @@ class PcodeLifterEngineMixin(SimEngineBase):
                 if self.__is_stop_point(addr, extra_stop_points):
                     # could this part be moved by pyvex?
                     return addr
-                first_imark = False
+            first_imark = False
         return None
 
-    def __is_stop_point(self,
-        addr: int,
-        extra_stop_points: Optional[Sequence[int]] = None) -> bool:
+    def __is_stop_point(self, addr: int, extra_stop_points: Optional[Sequence[int]] = None) -> bool:
         if self.project is not None and addr in self.project._sim_procedures:
             return True
         elif extra_stop_points is not None and addr in extra_stop_points:
@@ -1296,7 +1321,7 @@ class PcodeLifterEngineMixin(SimEngineBase):
         s = {
             "_use_cache": self._use_cache,
             "_default_opt_level": self._default_opt_level,
-            "_support_selfmodifying_code": self._support_selfmodifying_code,
+            "selfmodifying_code": self.selfmodifying_code,
             "_single_step": self._single_step,
             "_cache_size": self._cache_size,
             "default_strict_block_end": self.default_strict_block_end,
@@ -1308,7 +1333,7 @@ class PcodeLifterEngineMixin(SimEngineBase):
         s, ostate = state
         self._use_cache = s["_use_cache"]
         self._default_opt_level = s["_default_opt_level"]
-        self._support_selfmodifying_code = s["_support_selfmodifying_code"]
+        self.selfmodifying_code = s["selfmodifying_code"]
         self._single_step = s["_single_step"]
         self._cache_size = s["_cache_size"]
         self.default_strict_block_end = s["default_strict_block_end"]

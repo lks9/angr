@@ -7,9 +7,7 @@ from angr.analyses.decompiler.optimization_passes.base_ptr_save_simplifier impor
     BasePointerSaveSimplifier,
 )
 
-test_location = os.path.join(
-    os.path.dirname(os.path.realpath(__file__)), "..", "..", "binaries", "tests"
-)
+test_location = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "binaries", "tests")
 
 
 def _get_block(clinic, addr):
@@ -20,9 +18,7 @@ def _get_block(clinic, addr):
 
 
 def check_bp_save_fauxware(arch):
-    p = angr.Project(
-        os.path.join(test_location, arch, "fauxware"), auto_load_libs=False
-    )
+    p = angr.Project(os.path.join(test_location, arch, "fauxware"), auto_load_libs=False)
     cfg = p.analyses.CFGFast(normalize=True)
     main = p.kb.functions["main"]
     optimization_passes = [BasePointerSaveSimplifier]
@@ -30,12 +26,8 @@ def check_bp_save_fauxware(arch):
     first_block_stmts = dra.codegen._sequence.nodes[0].nodes[0].statements
     for stmt in first_block_stmts:
         if isinstance(stmt, ailment.Stmt.Store):
-            assert not (
-                isinstance(stmt.data, ailment.Expr.Register)
-                and stmt.data.reg_offset == p.arch.bp_offset
-            ) or (
-                isinstance(stmt.data, ailment.Expr.StackBaseOffset)
-                and stmt.data.offset == 0
+            assert not (isinstance(stmt.data, ailment.Expr.Register) and stmt.data.reg_offset == p.arch.bp_offset) or (
+                isinstance(stmt.data, ailment.Expr.StackBaseOffset) and stmt.data.offset == 0
             )
 
 
@@ -43,7 +35,6 @@ def check_bp_save_fauxware(arch):
 # pylint: disable=no-self-use
 class TestBaseptrSaveSimplifier(unittest.TestCase):
     def test_baseptr_save_simplifier_amd64(self):
-
         # decompile all:main and make sure the first and the last blocks do not save or restore to rbp
         bin_path = os.path.join(test_location, "x86_64", "all")
         proj = angr.Project(bin_path, auto_load_libs=False, load_debug_info=True)
@@ -52,9 +43,7 @@ class TestBaseptrSaveSimplifier(unittest.TestCase):
 
         optimization_passes = [BasePointerSaveSimplifier]
         main_func = cfg.functions["main"]
-        dec = proj.analyses.Decompiler(
-            main_func, cfg=cfg, optimization_passes=optimization_passes
-        )
+        dec = proj.analyses.Decompiler(main_func, cfg=cfg, optimization_passes=optimization_passes)
 
         entry_block = _get_block(dec.clinic, main_func.addr)
         endpoint_block = _get_block(dec.clinic, next(iter(main_func.endpoints)).addr)
@@ -63,12 +52,8 @@ class TestBaseptrSaveSimplifier(unittest.TestCase):
         assert endpoint_block is not None
 
         for stmt in entry_block.statements:
-            if isinstance(stmt, ailment.Stmt.Store) and isinstance(
-                stmt.data, ailment.Expr.StackBaseOffset
-            ):
-                assert (
-                    False
-                ), "Found a base-pointer saving statement in the first block."
+            if isinstance(stmt, ailment.Stmt.Store) and isinstance(stmt.data, ailment.Expr.StackBaseOffset):
+                assert False, "Found a base-pointer saving statement in the first block."
 
         for stmt in endpoint_block.statements:
             if (
@@ -76,9 +61,7 @@ class TestBaseptrSaveSimplifier(unittest.TestCase):
                 and isinstance(stmt.dst, ailment.Expr.Register)
                 and stmt.dst.reg_offset == proj.arch.bp_offset
             ):
-                assert (
-                    False
-                ), "Found a base-pointer restoring statement in the last block."
+                assert False, "Found a base-pointer restoring statement in the last block."
 
     def test_bp_save_amd64_fauxware(self):
         check_bp_save_fauxware("x86_64")

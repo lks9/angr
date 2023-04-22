@@ -32,18 +32,45 @@ class VariableRecoveryFastState(VariableRecoveryStateBase):
     :ivar KeyedRegion stack_region: The stack store.
     :ivar KeyedRegion register_region:  The register store.
     """
-    def __init__(self, block_addr, analysis, arch, func, stack_region=None, register_region=None, global_region=None,
-                 typevars=None, type_constraints=None, delayed_type_constraints=None, stack_offset_typevars=None,
-                 project=None):
 
-        super().__init__(block_addr, analysis, arch, func, stack_region=stack_region, register_region=register_region,
-                         global_region=global_region, typevars=typevars, type_constraints=type_constraints,
-                         delayed_type_constraints=delayed_type_constraints, stack_offset_typevars=stack_offset_typevars,
-                         project=project)
+    def __init__(
+        self,
+        block_addr,
+        analysis,
+        arch,
+        func,
+        stack_region=None,
+        register_region=None,
+        global_region=None,
+        typevars=None,
+        type_constraints=None,
+        delayed_type_constraints=None,
+        stack_offset_typevars=None,
+        project=None,
+        ret_val_size=None,
+    ):
+        super().__init__(
+            block_addr,
+            analysis,
+            arch,
+            func,
+            stack_region=stack_region,
+            register_region=register_region,
+            global_region=global_region,
+            typevars=typevars,
+            type_constraints=type_constraints,
+            delayed_type_constraints=delayed_type_constraints,
+            stack_offset_typevars=stack_offset_typevars,
+            project=project,
+        )
+        self.ret_val_size = ret_val_size
 
     def __repr__(self):
         return "<VRAbstractState@%#x: %d register variables, %d stack variables>" % (
-            self.block_addr, len(self.register_region), len(self.stack_region))
+            self.block_addr,
+            len(self.register_region),
+            len(self.stack_region),
+        )
 
     def __eq__(self, other):
         if type(other) is not VariableRecoveryFastState:
@@ -51,7 +78,6 @@ class VariableRecoveryFastState(VariableRecoveryStateBase):
         return self.stack_region == other.stack_region and self.register_region == other.register_region
 
     def copy(self):
-
         state = VariableRecoveryFastState(
             self.block_addr,
             self._analysis,
@@ -65,12 +91,14 @@ class VariableRecoveryFastState(VariableRecoveryStateBase):
             delayed_type_constraints=self.delayed_type_constraints.copy(),
             stack_offset_typevars=dict(self.stack_offset_typevars),
             project=self.project,
+            ret_val_size=self.ret_val_size,
         )
 
         return state
 
-    def merge(self, others: Tuple['VariableRecoveryFastState'],
-              successor=None) -> Tuple['VariableRecoveryFastState',bool]:
+    def merge(
+        self, others: Tuple["VariableRecoveryFastState"], successor=None
+    ) -> Tuple["VariableRecoveryFastState", bool]:
         """
         Merge two abstract states.
 
@@ -124,9 +152,9 @@ class VariableRecoveryFastState(VariableRecoveryStateBase):
             # when v1 (the new variable that will end up in the state) is ever used in the future.
 
             # create an equivalence relationship
-            equivalence = Equivalence(merged_typevars.get_type_variable(v1, None),
-                                      merged_typevars.get_type_variable(v0, None)
-                                      )
+            equivalence = Equivalence(
+                merged_typevars.get_type_variable(v1, None), merged_typevars.get_type_variable(v0, None)
+            )
             delayed_typeconstraints[v1].add(equivalence)
 
         stack_offset_typevars = {}
@@ -148,6 +176,13 @@ class VariableRecoveryFastState(VariableRecoveryStateBase):
                     merged_typeconstraints.add(Equivalence(orig_typevar, typevar))
             stack_offset_typevars[offset] = typevar
 
+        ret_val_size = self.ret_val_size
+        for o in others:
+            if o.ret_val_size is not None:
+                if ret_val_size is None or o.ret_val_size > ret_val_size:
+                    ret_val_size = o.ret_val_size
+                    merge_occurred = True
+
         # clean up
         self.phi_variables = {}
         self.successor_block_addr = None
@@ -165,6 +200,7 @@ class VariableRecoveryFastState(VariableRecoveryStateBase):
             delayed_type_constraints=delayed_typeconstraints,
             stack_offset_typevars=stack_offset_typevars,
             project=self.project,
+            ret_val_size=ret_val_size,
         )
 
         return state, merge_occurred
@@ -173,22 +209,20 @@ class VariableRecoveryFastState(VariableRecoveryStateBase):
     # Util methods
     #
 
-    def _normalize_register_offset(self, offset):  #pylint:disable=no-self-use
-
+    def _normalize_register_offset(self, offset):  # pylint:disable=no-self-use
         # TODO:
 
         return offset
 
     def _to_signed(self, n):
-
         if n >= 2 ** (self.arch.bits - 1):
             # convert it to a negative number
-            return n - 2 ** self.arch.bits
+            return n - 2**self.arch.bits
 
         return n
 
 
-class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disable=abstract-method
+class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  # pylint:disable=abstract-method
     """
     Recover "variables" from a function by keeping track of stack pointer offsets and pattern matching VEX statements.
 
@@ -199,19 +233,19 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
     """
 
     def __init__(
-            self,
-            func: Function,
-            func_graph: Optional[networkx.DiGraph]=None,
-            max_iterations: int=2,
-            low_priority=False,
-            track_sp=True,
-            func_args: Optional[List[SimVariable]]=None,
-            store_live_variables=False
+        self,
+        func: Function,
+        func_graph: Optional[networkx.DiGraph] = None,
+        max_iterations: int = 2,
+        low_priority=False,
+        track_sp=True,
+        func_args: Optional[List[SimVariable]] = None,
+        store_live_variables=False,
     ):
         func_graph_with_calls = func_graph or func.transition_graph
         call_info = defaultdict(list)
         for node_from, node_to, data in func_graph_with_calls.edges(data=True):
-            if data.get('type', None) == 'call' or data.get('outside', False):
+            if data.get("type", None) == "call" or data.get("outside", False):
                 try:
                     call_info[node_from.addr].append(self.kb.functions.get_by_addr(node_to.addr))
                 except KeyError:
@@ -224,8 +258,9 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
             raise AngrVariableRecoveryError("Function %s is empty." % repr(func))
 
         VariableRecoveryBase.__init__(self, func, max_iterations, store_live_variables)
-        ForwardAnalysis.__init__(self, order_jobs=True, allow_merging=True, allow_widening=False,
-                                 graph_visitor=function_graph_visitor)
+        ForwardAnalysis.__init__(
+            self, order_jobs=True, allow_merging=True, allow_widening=False, graph_visitor=function_graph_visitor
+        )
 
         self._low_priority = low_priority
         self._job_ctr = 0
@@ -237,9 +272,10 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
 
         self._node_iterations = defaultdict(int)
 
-        self._node_to_cc = { }
+        self._node_to_cc = {}
         self.var_to_typevars = defaultdict(set)
         self.type_constraints = None
+        self.ret_val_size = None
 
         self._analyze()
 
@@ -253,7 +289,6 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
     #
 
     def _pre_analysis(self):
-
         self.type_constraints = set()
 
         self.initialize_dominance_frontiers()
@@ -276,8 +311,13 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
             self._release_gil(self._job_ctr, 100, 0.000001)
 
     def _initial_abstract_state(self, node):
-        state = VariableRecoveryFastState(node.addr, self, self.project.arch, self.function, project=self.project,
-                                          )
+        state = VariableRecoveryFastState(
+            node.addr,
+            self,
+            self.project.arch,
+            self.function,
+            project=self.project,
+        )
         initial_sp = state.stack_address(self.project.arch.bytes if self.project.arch.call_pushes_ret else 0)
         if self.project.arch.sp_offset is not None:
             state.register_region.store(self.project.arch.sp_offset, initial_sp)
@@ -290,23 +330,28 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
         # put a return address on the stack if necessary
         if self.project.arch.call_pushes_ret:
             ret_addr_offset = self.project.arch.bytes
-            ret_addr_var = SimStackVariable(ret_addr_offset, self.project.arch.bytes, base='bp', name='ret_addr',
-                                            region=self.function.addr, category='return_address',
-                                            ident=internal_manager.next_variable_ident('stack')
-                                            )
+            ret_addr_var = SimStackVariable(
+                ret_addr_offset,
+                self.project.arch.bytes,
+                base="bp",
+                name="ret_addr",
+                region=self.function.addr,
+                category="return_address",
+                ident=internal_manager.next_variable_ident("stack"),
+            )
             ret_addr = claripy.BVS("ret_addr", self.project.arch.bits)
             ret_addr = state.annotate_with_variables(ret_addr, [(0, ret_addr_var)])
-            state.stack_region.store(state.stack_addr_from_offset(ret_addr_offset),
-                                     ret_addr,
-                                     endness=self.project.arch.memory_endness)
-            internal_manager.add_variable('stack', ret_addr_offset, ret_addr_var)
+            state.stack_region.store(
+                state.stack_addr_from_offset(ret_addr_offset), ret_addr, endness=self.project.arch.memory_endness
+            )
+            internal_manager.add_variable("stack", ret_addr_offset, ret_addr_var)
 
         if self.project.arch.name.startswith("MIPS"):
             t9_offset, t9_size = self.project.arch.registers["t9"]
             try:
                 t9_val = state.register_region.load(t9_offset, t9_size)
                 if state.is_top(t9_val):
-                    state.register_region.store(t9_offset, claripy.BVV(node.addr, t9_size*8))
+                    state.register_region.store(t9_offset, claripy.BVV(node.addr, t9_size * 8))
             except angr.errors.SimMemoryMissingError:
                 state.register_region.store(t9_offset, claripy.BVV(node.addr, t9_size * 8))
 
@@ -316,15 +361,16 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
                     v = claripy.BVS("reg_arg", arg.bits)
                     v = state.annotate_with_variables(v, [(0, arg)])
                     state.register_region.store(arg.reg, v)
-                    internal_manager.add_variable('register', arg.reg, arg)
+                    internal_manager.add_variable("register", arg.reg, arg)
                 elif isinstance(arg, SimStackVariable):
                     v = claripy.BVS("stack_arg", arg.bits)
                     v = state.annotate_with_variables(v, [(0, arg)])
-                    state.stack_region.store(state.stack_addr_from_offset(arg.offset),
-                                             v,
-                                             endness=self.project.arch.memory_endness,
-                                             )
-                    internal_manager.add_variable('stack', arg.offset, arg)
+                    state.stack_region.store(
+                        state.stack_addr_from_offset(arg.offset),
+                        v,
+                        endness=self.project.arch.memory_endness,
+                    )
+                    internal_manager.add_variable("stack", arg.offset, arg)
                 else:
                     raise TypeError("Unsupported function argument type %s." % type(arg))
 
@@ -364,7 +410,7 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
         # self._instates[node.addr] = state
 
         if self._node_iterations[node.addr] >= self._max_iterations:
-            l.debug('Skip node %#x as we have iterated %d times on it.', node.addr, self._node_iterations[node.addr])
+            l.debug("Skip node %#x as we have iterated %d times on it.", node.addr, self._node_iterations[node.addr])
             return False, state
 
         self._process_block(state, block)
@@ -373,6 +419,10 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
         self.type_constraints |= state.type_constraints
         for var, typevar in state.typevars._typevars.items():
             self.var_to_typevars[var].add(typevar)
+
+        if state.ret_val_size is not None:
+            if self.ret_val_size is None or self.ret_val_size < state.ret_val_size:
+                self.ret_val_size = state.ret_val_size
 
         state.downsize()
         self._outstates[node.addr] = state
@@ -383,7 +433,7 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
         pass
 
     def _post_analysis(self):
-        self.variable_manager['global'].assign_variable_names(labels=self.kb.labels)
+        self.variable_manager["global"].assign_variable_names(labels=self.kb.labels)
         self.variable_manager[self.function.addr].assign_variable_names()
 
         if self._store_live_variables:
@@ -400,6 +450,8 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
                 sorted_typevars = list(sorted(typevars, key=lambda x: str(x)))  # pylint:disable=unnecessary-lambda
                 for tv in sorted_typevars[1:]:
                     self.type_constraints.add(Equivalence(sorted_typevars[0], tv))
+
+        self.variable_manager[self.function.addr].ret_val_size = self.ret_val_size
 
     #
     # Private methods
@@ -421,7 +473,6 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
         return mapping.get(size)(value)
 
     def _peephole_optimize(self, block: Block):
-
         # find regN = xor(regN, regN) and replace it with PUT(regN) = 0
         i = 0
         while i < len(block.vex.statements) - 3:
@@ -438,10 +489,12 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
                         tmp1 = stmt1.tmp
                         stmt2 = block.vex.statements[i + 2]
                         if isinstance(stmt2, pyvex.IRStmt.WrTmp) and isinstance(stmt2.data, pyvex.IRExpr.Binop):
-                            if isinstance(stmt2.data.args[0], pyvex.IRExpr.RdTmp) \
-                                    and isinstance(stmt2.data.args[1], pyvex.IRExpr.RdTmp) \
-                                    and {stmt2.data.args[0].tmp, stmt2.data.args[1].tmp} == {tmp0, tmp1}\
-                                    and vexop_to_simop(stmt2.data.op)._generic_name == 'Xor':
+                            if (
+                                isinstance(stmt2.data.args[0], pyvex.IRExpr.RdTmp)
+                                and isinstance(stmt2.data.args[1], pyvex.IRExpr.RdTmp)
+                                and {stmt2.data.args[0].tmp, stmt2.data.args[1].tmp} == {tmp0, tmp1}
+                                and vexop_to_simop(stmt2.data.op)._generic_name == "Xor"
+                            ):
                                 # found it!
                                 # make a copy so we don't trash the cached VEX IRSB
                                 block._vex = block.vex.copy()
@@ -463,7 +516,7 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
         :return:
         """
 
-        l.debug('Processing block %#x.', block.addr)
+        l.debug("Processing block %#x.", block.addr)
 
         if isinstance(block, Block):
             try:
@@ -498,4 +551,5 @@ class VariableRecoveryFast(ForwardAnalysis, VariableRecoveryBase):  #pylint:disa
 
 
 from angr.analyses import AnalysesHub
-AnalysesHub.register_default('VariableRecoveryFast', VariableRecoveryFast)
+
+AnalysesHub.register_default("VariableRecoveryFast", VariableRecoveryFast)
