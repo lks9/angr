@@ -85,15 +85,15 @@ class C_expr_eval_visitor(CexprVisitor):
 
     def visitRelationalExpr(self, ctx: CexprParser.RelationalExprContext):
         # Note: this visitor is type agnostic !!
-        # so just treat anything as unsigned ("claripy.Sxx" would make it signed)
+        # so just treat anything as signed ("claripy.Uxx" would make it unsigned)
         if ctx.Less():
-            return "claripy.ULT(" + self.visit(ctx.shiftExpr(0)) + ", " + self.visit(ctx.shiftExpr(1)) + ")"
+            return "claripy.SLT(" + self.visit(ctx.shiftExpr(0)) + ", " + self.visit(ctx.shiftExpr(1)) + ")"
         elif ctx.LessEqual():
-            return "claripy.ULE(" + self.visit(ctx.shiftExpr(0)) + ", " + self.visit(ctx.shiftExpr(1)) + ")"
+            return "claripy.SLE(" + self.visit(ctx.shiftExpr(0)) + ", " + self.visit(ctx.shiftExpr(1)) + ")"
         elif ctx.GreaterEqual():
-            return "claripy.UGE(" + self.visit(ctx.shiftExpr(0)) + ", " + self.visit(ctx.shiftExpr(1)) + ")"
+            return "claripy.SGE(" + self.visit(ctx.shiftExpr(0)) + ", " + self.visit(ctx.shiftExpr(1)) + ")"
         elif ctx.Greater():
-            return "claripy.UGT(" + self.visit(ctx.shiftExpr(0)) + ", " + self.visit(ctx.shiftExpr(1)) + ")"
+            return "claripy.SGT(" + self.visit(ctx.shiftExpr(0)) + ", " + self.visit(ctx.shiftExpr(1)) + ")"
         else:
             return self.visit(ctx.shiftExpr(0))
 
