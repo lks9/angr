@@ -5,6 +5,7 @@ import claripy
 import pyvex
 
 from ...engines.light import SimEngineLightVEXMixin
+from ...calling_conventions import DEFAULT_CC, SimRegArg
 from .values import Top, Bottom
 from .engine_base import SimEnginePropagatorBase
 from .top_checker_mixin import TopCheckerMixin
@@ -22,18 +23,16 @@ class SimEnginePropagatorVEX(
     SimEngineLightVEXMixin,
     SimEnginePropagatorBase,
 ):
-
-    state: 'PropagatorVEXState'
+    state: "PropagatorVEXState"
 
     #
     # Private methods
     #
 
     def _process(self, state, successors, block=None, whitelist=None, **kwargs):  # pylint:disable=arguments-differ
-
         super()._process(state, successors, block=block, whitelist=whitelist, **kwargs)
 
-        if self.block.vex.jumpkind == 'Ijk_Call':
+        if self.block.vex.jumpkind == "Ijk_Call":
             if self.arch.call_pushes_ret:
                 # pop ret from the stack
                 sp_offset = self.arch.sp_offset
@@ -56,10 +55,13 @@ class SimEnginePropagatorVEX(
         if v is not None and type(v) not in {Bottom, Top} and v is not expr:
             # Record the replacement
             if type(expr) is pyvex.IRExpr.Get:
-                if expr.offset not in (self.arch.sp_offset, self.arch.ip_offset, ):
-                    self.state.add_replacement(self._codeloc(block_only=False),
-                                               VEXReg(expr.offset, expr.result_size(self.tyenv) // 8),
-                                               v)
+                if expr.offset not in (
+                    self.arch.sp_offset,
+                    self.arch.ip_offset,
+                ):
+                    self.state.add_replacement(
+                        self._codeloc(block_only=False), VEXReg(expr.offset, expr.result_size(self.tyenv) // 8), v
+                    )
         return v
 
     def _load_data(self, addr, size, endness):
@@ -104,11 +106,17 @@ class SimEnginePropagatorVEX(
                     # getpc:
                     #   mov ebx, [esp]
                     #   ret
-                    ebx_offset = self.arch.registers['ebx'][0]
-                    self.state.store_register(ebx_offset,
-                                              4,
-                                              claripy.BVV(self.block.addr + self.block.size, 32)
-                                              )
+                    ebx_offset = self.arch.registers["ebx"][0]
+                    self.state.store_register(ebx_offset, 4, claripy.BVV(self.block.addr + self.block.size, 32))
+        if self.arch.name in DEFAULT_CC:
+            cc = DEFAULT_CC[self.arch.name]  # don't instantiate the class for speed
+            if isinstance(cc.RETURN_VAL, SimRegArg):
+                offset, size = self.arch.registers[cc.RETURN_VAL.reg_name]
+                self.state.store_register(offset, size, self.state.top(size * self.arch.byte_width))
+            if cc.CALLER_SAVED_REGS:
+                for reg_name in cc.CALLER_SAVED_REGS:
+                    offset, size = self.arch.registers[reg_name]
+                    self.state.store_register(offset, size, self.state.top(size * self.arch.byte_width))
 
     #
     # VEX statement handlers
@@ -162,8 +170,9 @@ class SimEnginePropagatorVEX(
         if guard is True:
             addr = self._expr(stmt.addr)
             if addr is not None:
-                self.tmps[stmt.dst] = self._load_data(addr, stmt.alt.result_size(self.tyenv) // 8,
-                                                      self.arch.memory_endness)
+                self.tmps[stmt.dst] = self._load_data(
+                    addr, stmt.alt.result_size(self.tyenv) // 8, self.arch.memory_endness
+                )
         elif guard is False:
             data = self._expr(stmt.alt)
             self.tmps[stmt.dst] = data
@@ -175,7 +184,6 @@ class SimEnginePropagatorVEX(
             self.state.add_replacement(self._codeloc(block_only=True), VEXTmp(stmt.dst), self.tmps[stmt.dst])
 
     def _handle_StoreG(self, stmt):
-
         guard = self._expr(stmt.guard)
         data = self._expr(stmt.data)
         if guard is True:
@@ -183,10 +191,10 @@ class SimEnginePropagatorVEX(
             if addr is not None:
                 self._store_data(addr, data, stmt.data.result_size(self.tyenv) // 8, self.arch.memory_endness)
 
-        #elif guard is False:
+        # elif guard is False:
         #    data = self._expr(stmt.alt)
         #    self.tmps[stmt.dst] = data
-        #else:
+        # else:
         #    self.tmps[stmt.dst] = None
 
     def _handle_LLSC(self, stmt: pyvex.IRStmt.LLSC):
@@ -198,9 +206,7 @@ class SimEnginePropagatorVEX(
             if data is not None:
                 self.tmps[stmt.result] = data
             if stmt.result in self.tmps:
-                self.state.add_replacement(self._codeloc(block_only=True),
-                                           VEXTmp(stmt.result),
-                                           self.tmps[stmt.result])
+                self.state.add_replacement(self._codeloc(block_only=True), VEXTmp(stmt.result), self.tmps[stmt.result])
         else:
             # store-conditional
             storedata = self._expr(stmt.storedata)
@@ -210,9 +216,7 @@ class SimEnginePropagatorVEX(
                 self._store_data(addr, storedata, size, stmt.endness)
 
             self.tmps[stmt.result] = 1
-            self.state.add_replacement(self._codeloc(block_only=True),
-                                       VEXTmp(stmt.result),
-                                       self.tmps[stmt.result])
+            self.state.add_replacement(self._codeloc(block_only=True), VEXTmp(stmt.result), self.tmps[stmt.result])
 
     #
     # Expression handlers

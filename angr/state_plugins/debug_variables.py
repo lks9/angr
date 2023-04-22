@@ -22,6 +22,7 @@ class SimDebugVariable:
     A SimDebugVariable will get dynamically created when queriyng for variable in a state with the
     SimDebugVariablePlugin. It features a link to the state, an address and a type.
     """
+
     def __init__(self, state: SimState, addr, var_type: VariableType):
         self.state = state
         self.addr = addr
@@ -184,9 +185,9 @@ class SimDebugVariablePlugin(SimStatePlugin):
     @property
     def dwarf_cfa_approx(self):
         # FIXME This is only an approximation!
-        if self.state.arch.name == 'AMD64':
+        if self.state.arch.name == "AMD64":
             return self.state.regs.rbp + 16
-        elif self.state.arch.name == 'X86':
+        elif self.state.arch.name == "X86":
             return self.state.regs.ebp + 8
         return 0
 
@@ -206,4 +207,4 @@ class SimDebugVariablePlugin(SimStatePlugin):
         return c_expr_eval(c_expr, self.get_variable)
 
 
-SimState.register_default('dvars', SimDebugVariablePlugin)
+SimState.register_default("dvars", SimDebugVariablePlugin)

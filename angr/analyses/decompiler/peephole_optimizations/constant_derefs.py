@@ -11,10 +11,9 @@ class ConstantDereferences(PeepholeOptimizationExprBase):
     __slots__ = ()
 
     NAME = "Dereference constant references"
-    expr_classes = (Load, )
+    expr_classes = (Load,)
 
     def optimize(self, expr: Load):
-
         if isinstance(expr.addr, Const):
             # is it loading from a read-only section?
             sec = self.project.loader.find_section_containing(expr.addr.value)

@@ -6,7 +6,7 @@ from .engine import SuccessorsMixin
 from ..errors import SimConcreteRegisterError
 
 l = logging.getLogger("angr.engines.concrete")
-#l.setLevel(logging.DEBUG)
+# l.setLevel(logging.DEBUG)
 
 try:
     from angr_targets.concrete import ConcreteTarget
@@ -18,6 +18,7 @@ class SimEngineConcrete(SuccessorsMixin):
     """
     Concrete execution using a concrete target provided by the user.
     """
+
     def __init__(self, project):
         if not ConcreteTarget:
             l.critical("Error, can't find angr_target project")
@@ -26,9 +27,9 @@ class SimEngineConcrete(SuccessorsMixin):
         l.info("Initializing SimEngineConcrete with ConcreteTarget provided.")
         super().__init__()
         self.project = project
-        if isinstance(self.project.concrete_target, ConcreteTarget) and \
-                self.check_concrete_target_methods(self.project.concrete_target):
-
+        if isinstance(self.project.concrete_target, ConcreteTarget) and self.check_concrete_target_methods(
+            self.project.concrete_target
+        ):
             self.target = self.project.concrete_target
         else:
             l.warning("Error, you must provide an instance of a ConcreteTarget to initialize a SimEngineConcrete.")
@@ -37,9 +38,16 @@ class SimEngineConcrete(SuccessorsMixin):
 
         self.segment_registers_already_init = False
 
-    def process_successors(self, successors, extra_stop_points=None, memory_concretize=None,
-                           register_concretize=None, timeout=0, *args, **kwargs):
-
+    def process_successors(
+        self,
+        successors,
+        extra_stop_points=None,
+        memory_concretize=None,
+        register_concretize=None,
+        timeout=0,
+        *args,
+        **kwargs,
+    ):
         new_state = self.state
         # setup the concrete process and resume the execution
         self.to_engine(new_state, extra_stop_points, memory_concretize, register_concretize, timeout)
@@ -75,8 +83,12 @@ class SimEngineConcrete(SuccessorsMixin):
         state.globals["symbion_timeout"] = False
         extra_stop_points = [] if extra_stop_points is None else extra_stop_points
 
-        l.debug("Entering in SimEngineConcrete: simulated address %#x concrete address %#x stop points %s",
-                state.addr, self.target.read_register("pc"), map(hex, extra_stop_points))
+        l.debug(
+            "Entering in SimEngineConcrete: simulated address %#x concrete address %#x stop points %s",
+            state.addr,
+            self.target.read_register("pc"),
+            map(hex, extra_stop_points),
+        )
 
         if memory_concretize:
             l.debug("SimEngineConcrete is concretizing memory variables before resuming the concrete process")
@@ -104,7 +116,7 @@ class SimEngineConcrete(SuccessorsMixin):
             l.debug("Found timeout as option, setting it up!")
 
             def timeout_handler():
-                self.target.stop()    # stop the concrete target now!
+                self.target.stop()  # stop the concrete target now!
                 state.globals["symbion_timeout"] = True  # this will end up in the timeout stash
 
             execution_timer = threading.Timer(timeout, timeout_handler)
@@ -118,8 +130,10 @@ class SimEngineConcrete(SuccessorsMixin):
 
         if state.globals["symbion_timeout"]:
             l.critical("Timeout has been reached during resuming of concrete process")
-            l.critical("This can be a bad thing ( the ConcreteTarget didn't hit your breakpoint ) or"
-                       "just it will take a while.")
+            l.critical(
+                "This can be a bad thing ( the ConcreteTarget didn't hit your breakpoint ) or"
+                "just it will take a while."
+            )
 
         # reset the alarm
         if timeout > 0:
@@ -143,13 +157,13 @@ class SimEngineConcrete(SuccessorsMixin):
         :return: True if the concrete target is compliant
         """
         entry_point = concrete_target.read_register("pc")
-        if not type(entry_point) is int:
+        if type(entry_point) is not int:
             l.error("read_register result type is %s, should be <type 'int'>", (type(entry_point)))
             return False
 
         mem_read = concrete_target.read_memory(entry_point, 0x4)
 
-        if not type(mem_read) is bytes:
+        if type(mem_read) is not bytes:
             l.error("read_memory result type is %s, should be <type 'bytes'>", (type(mem_read)))
             return False
 

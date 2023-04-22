@@ -34,23 +34,35 @@ class EagerReturnsSimplifier(OptimizationPass):
     """
 
     # TODO: This optimization pass may support more architectures and platforms
-    ARCHES = ["X86", "AMD64", "ARMCortexM", "ARMHF", "ARMEL", ]
+    ARCHES = [
+        "X86",
+        "AMD64",
+        "ARMCortexM",
+        "ARMHF",
+        "ARMEL",
+    ]
     PLATFORMS = ["cgc", "linux"]
-    STAGE = OptimizationPassStage.DURING_REGION_IDENTIFICATION
+    STAGE = OptimizationPassStage.AFTER_AIL_GRAPH_CREATION
     NAME = "Duplicate return blocks to reduce goto statements"
-    DESCRIPTION = inspect.cleandoc(__doc__[:__doc__.index(":ivar")])  # pylint:disable=unsubscriptable-object
+    DESCRIPTION = inspect.cleandoc(__doc__[: __doc__.index(":ivar")])  # pylint:disable=unsubscriptable-object
 
-    def __init__(self, func, blocks_by_addr=None, blocks_by_addr_and_idx=None, graph=None,
-                 # internal parameters that should be used by Clinic
-                 node_idx_start=0,
-                 # settings
-                 max_level=2,
-                 min_indegree=2,
-                 reaching_definitions=None,
-                 **kwargs):
-
-        super().__init__(func, blocks_by_addr=blocks_by_addr, blocks_by_addr_and_idx=blocks_by_addr_and_idx,
-                         graph=graph, **kwargs)
+    def __init__(
+        self,
+        func,
+        blocks_by_addr=None,
+        blocks_by_addr_and_idx=None,
+        graph=None,
+        # internal parameters that should be used by Clinic
+        node_idx_start=0,
+        # settings
+        max_level=2,
+        min_indegree=2,
+        reaching_definitions=None,
+        **kwargs,
+    ):
+        super().__init__(
+            func, blocks_by_addr=blocks_by_addr, blocks_by_addr_and_idx=blocks_by_addr_and_idx, graph=graph, **kwargs
+        )
 
         self.max_level = max_level
         self.min_indegree = min_indegree
@@ -60,7 +72,6 @@ class EagerReturnsSimplifier(OptimizationPass):
         self.analyze()
 
     def _check(self):
-
         # does this function have end points?
         if not self._func.endpoints:
             return False, None
@@ -70,7 +81,6 @@ class EagerReturnsSimplifier(OptimizationPass):
         return True, None
 
     def _analyze(self, cache=None):
-
         # for each block with no successors and more than 1 predecessors, make copies of this block and link it back to
         # the sources of incoming edges
         graph_copy = networkx.DiGraph(self._graph)
@@ -88,14 +98,13 @@ class EagerReturnsSimplifier(OptimizationPass):
             self.out_graph = graph_copy
 
     def _analyze_core(self, graph: networkx.DiGraph):
-
-        endnodes = [ node for node in graph.nodes() if graph.out_degree[node] == 0 ]
+        endnodes = [node for node in graph.nodes() if graph.out_degree[node] == 0]
         graph_changed = False
 
         # to_update is keyed by the region head.
         # this is because different end nodes may lead to the same region head: consider the case of the typical "fork"
         # region where stack canary is checked in x86-64 binaries.
-        to_update: Dict[Any,Tuple[List[Tuple[Any,Any]],networkx.DiGraph]] = { }
+        to_update: Dict[Any, Tuple[List[Tuple[Any, Any]], networkx.DiGraph]] = {}
 
         for end_node in endnodes:
             in_edges = list(graph.in_edges(end_node))
@@ -109,7 +118,7 @@ class EagerReturnsSimplifier(OptimizationPass):
                 region, region_head = self._single_entry_region(graph, end_node)
                 tmp_in_edges = graph.in_edges(region_head)
                 # remove in_edges that are coming from a node inside the region
-                in_edges = [ ]
+                in_edges = []
                 for src, dst in tmp_in_edges:
                     if src not in region:
                         in_edges.append((src, dst))
@@ -136,8 +145,8 @@ class EagerReturnsSimplifier(OptimizationPass):
                 pred_node = in_edge[0]
 
                 # Modify the graph and then add an edge to the copy of the region
-                copies = { }
-                queue = [ (pred_node, region_head) ]
+                copies = {}
+                queue = [(pred_node, region_head)]
                 while queue:
                     pred, node = queue.pop(0)
                     if node in copies:
@@ -201,7 +210,7 @@ class EagerReturnsSimplifier(OptimizationPass):
         region = networkx.DiGraph()
         region.add_node(end_node)
 
-        traversed = { end_node }
+        traversed = {end_node}
         region_head = end_node
         while True:
             preds = list(graph.predecessors(region_head))

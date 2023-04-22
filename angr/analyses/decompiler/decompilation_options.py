@@ -9,9 +9,21 @@ class DecompilationOption:
     """
     Describes a decompilation option.
     """
-    def __init__(self, name, description, value_type, cls, param, value_range=None, category="General",
-                 default_value=None, clears_cache=True, candidate_values: Optional[List]=None,
-                 convert: Optional[Callable]=None):
+
+    def __init__(
+        self,
+        name,
+        description,
+        value_type,
+        cls,
+        param,
+        value_range=None,
+        category="General",
+        default_value=None,
+        clears_cache=True,
+        candidate_values: Optional[List] = None,
+        convert: Optional[Callable] = None,
+    ):
         self.NAME = name
         self.DESCRIPTION = description
         self.value_type = value_type
@@ -23,6 +35,9 @@ class DecompilationOption:
         self.clears_cache = clears_cache
         self.candidate_values = candidate_values
         self.convert = convert
+
+    def __repr__(self):
+        return f"<DecOption [{self.category}] {self.NAME} ({self.cls}.{self.param})>"
 
 
 O = DecompilationOption
@@ -62,6 +77,16 @@ options = [
         default_value=True,
     ),
     O(
+        "Simplify switches by undoing switch clustering",
+        "Undoing switch clustering that modern compilers employ. Switch clustering will split a switch into "
+        "multiple pieces and transform (or lower) them piece-by-piece for better performance (and lower readability).",
+        bool,
+        "region_simplifier",
+        "simplify_switches",
+        category="Graph",
+        default_value=True,
+    ),
+    O(
         "Show casts",
         "Disabling this option will blindly remove all C typecast constructs from pseudocode output.",
         bool,
@@ -83,7 +108,7 @@ options = [
     ),
     O(
         "Braces on own lines",
-        "Highly controversial. Disable this to see \"} else {\".",
+        'Highly controversial. Disable this to see "} else {".',
         bool,
         "codegen",
         "braces_on_own_lines",
@@ -156,6 +181,7 @@ for o in options:
 #
 # Option Helpers
 #
+
 
 def get_structurer_option() -> Optional[DecompilationOption]:
     for opt in options:

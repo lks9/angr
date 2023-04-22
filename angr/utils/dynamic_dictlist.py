@@ -22,22 +22,23 @@ class DynamicDictList(Generic[VT]):
     https://github.com/angr/angr/pull/3471#issuecomment-1236515950.
     """
 
-    __slots__ = ('list_content', 'dict_content', 'max_size')
+    __slots__ = ("list_content", "dict_content", "max_size")
 
-    def __init__(self,
-                 max_size: Optional[int]=None,
-                 content: Optional[Union['DynamicDictList',Dict[int,VT],List[VT]]]=None):
+    def __init__(
+        self,
+        max_size: Optional[int] = None,
+        content: Optional[Union["DynamicDictList", Dict[int, VT], List[VT]]] = None,
+    ):
         self.list_content: Optional[List[VT]] = None
-        self.dict_content: Optional[Dict[int,VT]] = None
+        self.dict_content: Optional[Dict[int, VT]] = None
         self.max_size = max_size
 
         if content:
             self._initialize_content(content)
         else:
-            self.dict_content = { }
+            self.dict_content = {}
 
     def _initialize_content(self, content) -> None:
-
         if isinstance(content, DynamicDictList):
             # make a copy
             self.list_content = list(content.list_content) if content.list_content is not None else None

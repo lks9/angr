@@ -1,7 +1,7 @@
 # pylint:disable=multiple-statements,line-too-long,consider-using-enumerate
-from typing import Dict, Set, Optional, Any, List, Union, Tuple, TYPE_CHECKING
+from typing import Dict, Set, Optional, Any, List, Union, Tuple, OrderedDict as ODict, TYPE_CHECKING
 import logging
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 
 import networkx
 
@@ -15,9 +15,27 @@ from ..empty_node_remover import EmptyNodeRemover
 from ..jumptable_entry_condition_rewriter import JumpTableEntryConditionRewriter
 from ..condition_processor import ConditionProcessor
 from ..region_simplifiers.cascading_cond_transformer import CascadingConditionTransformer
-from ..utils import extract_jump_targets, get_ast_subexprs, switch_extract_cmp_bounds, remove_last_statement
-from .structurer_nodes import (SequenceNode, CodeNode, ConditionNode, ConditionalBreakNode, LoopNode, SwitchCaseNode,
-    BreakNode, ContinueNode, MultiNode, CascadingConditionNode, BaseNode, EmptyBlockNotice)
+from ..utils import (
+    extract_jump_targets,
+    get_ast_subexprs,
+    switch_extract_cmp_bounds,
+    remove_last_statement,
+    first_nonlabel_node,
+)
+from .structurer_nodes import (
+    SequenceNode,
+    CodeNode,
+    ConditionNode,
+    ConditionalBreakNode,
+    LoopNode,
+    SwitchCaseNode,
+    BreakNode,
+    ContinueNode,
+    MultiNode,
+    CascadingConditionNode,
+    BaseNode,
+    EmptyBlockNotice,
+)
 from .structurer_base import StructurerBase
 
 
@@ -41,32 +59,53 @@ class DreamStructurer(StructurerBase):
     The current function graph is provided so that we can detect certain edge cases, for example, jump table entries no
     longer exist due to empty node removal during structuring or prior steps.
     """
-    def __init__(self, region, parent_map=None, condition_processor=None, func: Optional['Function']=None,
-                 case_entry_to_switch_head: Optional[Dict[int,int]]=None, parent_region=None, improve_structurer=True):
-        super().__init__(region, parent_map=parent_map, condition_processor=condition_processor, func=func,
-                         case_entry_to_switch_head=case_entry_to_switch_head, parent_region=parent_region)
+
+    NAME = "dream"
+
+    def __init__(
+        self,
+        region,
+        parent_map=None,
+        condition_processor=None,
+        func: Optional["Function"] = None,
+        case_entry_to_switch_head: Optional[Dict[int, int]] = None,
+        parent_region=None,
+        improve_structurer=True,
+    ):
+        super().__init__(
+            region,
+            parent_map=parent_map,
+            condition_processor=condition_processor,
+            func=func,
+            case_entry_to_switch_head=case_entry_to_switch_head,
+            parent_region=parent_region,
+        )
 
         self._analyze()
 
     def _analyze(self):
-
         has_cycle = self._has_cycle()
         # sanity checks
         if self._region.cyclic:
             if not has_cycle:
-                l.critical("Region %r is supposed to be a cyclic region but there is no cycle inside. This is usually "
-                           "due to the existence of loop headers with more than one in-edges, which angr decompiler "
-                           "does not support yet. The decompilation result will be wrong.", self._region)
+                l.critical(
+                    "Region %r is supposed to be a cyclic region but there is no cycle inside. This is usually "
+                    "due to the existence of loop headers with more than one in-edges, which angr decompiler "
+                    "does not support yet. The decompilation result will be wrong.",
+                    self._region,
+                )
             self._analyze_cyclic()
         else:
             if has_cycle:
-                l.critical("Region %r is supposed to be an acyclic region but there are cycles inside. This is usually "
-                           "due to the existence of loop headers with more than one in-edges, which angr decompiler "
-                           "does not support yet. The decompilation result will be wrong.", self._region)
+                l.critical(
+                    "Region %r is supposed to be an acyclic region but there are cycles inside. This is usually "
+                    "due to the existence of loop headers with more than one in-edges, which angr decompiler "
+                    "does not support yet. The decompilation result will be wrong.",
+                    self._region,
+                )
             self._analyze_acyclic()
 
     def _analyze_cyclic(self):
-
         loop_head = self._region.head
 
         loop_subgraph = self._region.graph
@@ -78,16 +117,17 @@ class DreamStructurer(StructurerBase):
 
         loop_node = self._refine_loop(loop_node)
 
-        seq = SequenceNode(loop_head.addr,
-                           nodes=[ loop_node ] + [ succ for succ in successors if succ in self._region.graph ])
+        seq = SequenceNode(
+            loop_head.addr, nodes=[loop_node] + [succ for succ in successors if succ in self._region.graph]
+        )
 
         self.result = seq
 
     def _analyze_acyclic(self):
-
         # let's generate conditions first
-        self.cond_proc.recover_reaching_conditions(self._region, with_successors=True,
-                                                   case_entry_to_switch_head=self._case_entry_to_switch_head)
+        self.cond_proc.recover_reaching_conditions(
+            self._region, with_successors=True, case_entry_to_switch_head=self._case_entry_to_switch_head
+        )
 
         # make the sequence node and pack reaching conditions into CodeNode instances
         seq = self._make_sequence()
@@ -108,7 +148,6 @@ class DreamStructurer(StructurerBase):
         self.result = seq
 
     def _find_loop_nodes_and_successors(self):
-
         graph = self._region.graph
         head = self._region.head
 
@@ -143,7 +182,7 @@ class DreamStructurer(StructurerBase):
 
         # find loop nodes and successors
         loop_subgraph = networkx.subgraph(graph, loop_nodes)
-        loop_node_addrs = { node.addr for node in loop_subgraph }
+        loop_node_addrs = {node.addr for node in loop_subgraph}
 
         # Case A: The loop successor is inside the current region (does it happen at all?)
         loop_successors = set()
@@ -171,24 +210,24 @@ class DreamStructurer(StructurerBase):
         return loop_subgraph, loop_successors
 
     def _make_endless_loop(self, loop_head, loop_subgraph, loop_successors):
-
         loop_body = self._to_loop_body_sequence(loop_head, loop_subgraph, loop_successors)
 
         # create a while(true) loop with sequence node being the loop body
-        loop_node = LoopNode('while', None, loop_body, addr=loop_head.addr)
+        loop_node = LoopNode("while", None, loop_body, addr=loop_head.addr)
 
         return loop_node
 
     def _refine_loop(self, loop_node):
-
         while True:
             # while
             r, loop_node = self._refine_loop_while(loop_node)
-            if r: continue
+            if r:
+                continue
 
             # do-while
             r, loop_node = self._refine_loop_dowhile(loop_node)
-            if r: continue
+            if r:
+                continue
 
             # no more changes
             break
@@ -197,17 +236,18 @@ class DreamStructurer(StructurerBase):
 
     @staticmethod
     def _refine_loop_while(loop_node):
-
-        if loop_node.sort == 'while' and loop_node.condition is None and loop_node.sequence_node.nodes:
+        if loop_node.sort == "while" and loop_node.condition is None and loop_node.sequence_node.nodes:
             # it's an endless loop
-            first_node = loop_node.sequence_node.nodes[0]
+            first_node = first_nonlabel_node(loop_node.sequence_node)
             if type(first_node) is CodeNode:
-                first_node = first_node.node
-            if type(first_node) is ConditionalBreakNode:
-                while_cond = ConditionProcessor.simplify_condition(claripy.Not(first_node.condition))
+                inner_first_node = first_node.node
+            else:
+                inner_first_node = first_node
+            if type(inner_first_node) is ConditionalBreakNode:
+                while_cond = ConditionProcessor.simplify_condition(claripy.Not(inner_first_node.condition))
                 new_seq = loop_node.sequence_node.copy()
-                new_seq.nodes = new_seq.nodes[1:]
-                new_loop_node = LoopNode('while', while_cond, new_seq, addr=loop_node.addr)
+                new_seq.nodes = [nn for nn in new_seq.nodes if nn is not first_node]
+                new_loop_node = LoopNode("while", while_cond, new_seq, addr=loop_node.addr)
 
                 return True, new_loop_node
 
@@ -215,32 +255,30 @@ class DreamStructurer(StructurerBase):
 
     @staticmethod
     def _refine_loop_dowhile(loop_node):
-
-        if loop_node.sort == 'while' and loop_node.condition is None and loop_node.sequence_node.nodes:
+        if loop_node.sort == "while" and loop_node.condition is None and loop_node.sequence_node.nodes:
             # it's an endless loop
             last_node = loop_node.sequence_node.nodes[-1]
             if type(last_node) is ConditionalBreakNode:
                 while_cond = ConditionProcessor.simplify_condition(claripy.Not(last_node.condition))
                 new_seq = loop_node.sequence_node.copy()
                 new_seq.nodes = new_seq.nodes[:-1]
-                new_loop_node = LoopNode('do-while', while_cond, new_seq)
+                new_loop_node = LoopNode("do-while", while_cond, new_seq)
 
                 return True, new_loop_node
 
         return False, loop_node
 
     def _to_loop_body_sequence(self, loop_head, loop_subgraph, loop_successors):
-
         graph = self._region.graph_with_successors
         loop_region_graph = networkx.DiGraph()
 
         # TODO: Make sure the loop body has been structured
 
-        queue = [ loop_head ]
+        queue = [loop_head]
         traversed = set()
         loop_successor_addrs = {succ.addr for succ in loop_successors}
         replaced_nodes = {}
-        outedges = [ ]
+        outedges = []
 
         while queue:
             node = queue[0]
@@ -273,10 +311,12 @@ class DreamStructurer(StructurerBase):
         for src, dst, edge_data in outedges:
             loop_region_graph_with_successors.add_edge(src, dst, **edge_data)
             loop_successors.add(dst)
-        region = GraphRegion(loop_head, loop_region_graph, successors=None,
-                             graph_with_successors=None, cyclic=False, full_graph=None)
-        structurer = self.project.analyses[DreamStructurer].prep()(region, condition_processor=self.cond_proc,
-                                                                   func=self.function)
+        region = GraphRegion(
+            loop_head, loop_region_graph, successors=None, graph_with_successors=None, cyclic=False, full_graph=None
+        )
+        structurer = self.project.analyses[DreamStructurer].prep()(
+            region, condition_processor=self.cond_proc, func=self.function
+        )
         seq = structurer.result
 
         # traverse this node and rewrite all conditional jumps that go outside the loop to breaks
@@ -290,9 +330,11 @@ class DreamStructurer(StructurerBase):
 
         while True:
             r, seq = self._merge_conditional_breaks(seq)
-            if r: continue
+            if r:
+                continue
             r, seq = self._merge_nesting_conditionals(seq)
-            if r: continue
+            if r:
+                continue
             break
 
         seq = EmptyNodeRemover(seq).result
@@ -300,7 +342,6 @@ class DreamStructurer(StructurerBase):
         return seq
 
     def _make_sequence(self):
-
         seq = SequenceNode(None)
 
         for node in CFGUtils.quasi_topological_sort_nodes(self._region.graph):
@@ -313,7 +354,6 @@ class DreamStructurer(StructurerBase):
 
     @staticmethod
     def _unpack_sequence(seq):
-
         def _handle_Code(node, **kwargs):  # pylint:disable=unused-argument
             node = node.node
             return walker._handle(node)
@@ -331,7 +371,7 @@ class DreamStructurer(StructurerBase):
             return node
 
         def _handle_CascadingConditionNode(node: CascadingConditionNode, **kwargs):  # pylint:disable=unused-argument
-            new_cond_and_nodes = [ ]
+            new_cond_and_nodes = []
             for cond, child_node in node.condition_and_nodes:
                 new_cond_and_nodes.append((cond, walker._handle(child_node)))
             node.condition_and_nodes = new_cond_and_nodes
@@ -371,7 +411,6 @@ class DreamStructurer(StructurerBase):
         return seq
 
     def _structure_sequence(self, seq):
-
         self._make_switch_cases(seq)
 
         # this is hackish...
@@ -396,18 +435,19 @@ class DreamStructurer(StructurerBase):
 
         while True:
             r, seq = self._merge_conditional_breaks(seq)
-            if r: continue
+            if r:
+                continue
             r, seq = self._merge_nesting_conditionals(seq)
-            if r: continue
+            if r:
+                continue
             break
 
     def _merge_same_conditioned_nodes(self, seq):
-
         # search for nodes with the same reaching condition and then merge them into one sequence node
         i = 0
         while i < len(seq.nodes) - 1:
             node_0 = seq.nodes[i]
-            if not type(node_0) is CodeNode:
+            if type(node_0) is not CodeNode:
                 i += 1
                 continue
             rcond_0 = node_0.reaching_condition
@@ -415,7 +455,7 @@ class DreamStructurer(StructurerBase):
                 i += 1
                 continue
             node_1 = seq.nodes[i + 1]
-            if not type(node_1) is CodeNode:
+            if type(node_1) is not CodeNode:
                 i += 1
                 continue
             rcond_1 = node_1.reaching_condition
@@ -429,7 +469,7 @@ class DreamStructurer(StructurerBase):
                     self._merge_nodes(node_0.node, node_1.node),
                     node_0.reaching_condition,
                 )
-                seq.nodes = seq.nodes[:i] + [new_node] + seq.nodes[i + 2:]
+                seq.nodes = seq.nodes[:i] + [new_node] + seq.nodes[i + 2 :]
                 continue
             i += 1
 
@@ -445,15 +485,14 @@ class DreamStructurer(StructurerBase):
         :return:        None
         """
 
-        jump_tables = self.kb.cfgs['CFGFast'].jump_tables
+        jump_tables = self.kb.cfgs["CFGFast"].jump_tables
 
-        addr2nodes: Dict[int,Set[CodeNode]] = defaultdict(set)
+        addr2nodes: Dict[int, Set[CodeNode]] = defaultdict(set)
         for node in seq.nodes:
             addr2nodes[node.addr].add(node)
 
         while True:
             for i in range(len(seq.nodes)):
-
                 node = seq.nodes[i]
 
                 # Jumptable_AddressLoadedFromMemory
@@ -472,8 +511,9 @@ class DreamStructurer(StructurerBase):
                 # we did not find any node that looks like a switch-case. exit.
                 break
 
-    def _make_switch_cases_address_loaded_from_memory(self, seq, i, node, addr2nodes: Dict[int,Set[CodeNode]],
-                                                      jump_tables: Dict[int,IndirectJump]) -> bool:
+    def _make_switch_cases_address_loaded_from_memory(
+        self, seq, i, node, addr2nodes: Dict[int, Set[CodeNode]], jump_tables: Dict[int, IndirectJump]
+    ) -> bool:
         """
         A typical jump table involves multiple nodes, which look like the following:
 
@@ -482,7 +522,9 @@ class DreamStructurer(StructurerBase):
                     { Goto A<64> } else { Goto B<64> }
 
         A:     (with an indirect jump)
-               Goto((Conv(32->64, Load(addr=(0x40964c<64> + (Load(addr=stack_base-80, size=8, endness=Iend_LE) Mul 0x4<8>)), size=4, endness=Iend_LE)) + 0x40964c<64>))
+               Goto((
+                Conv(32->64, Load(addr=(0x40964c<64> + (Load(addr=stack_base-80, size=8, endness=Iend_LE) Mul 0x4<8>)),
+                size=4, endness=Iend_LE)) + 0x40964c<64>))
 
         B:     (the default case)
         """
@@ -526,8 +568,9 @@ class DreamStructurer(StructurerBase):
             return False
 
         # build switch-cases
-        cases, node_default, to_remove = self._switch_build_cases(seq, cmp_lb, jump_table.jumptable_entries, i,
-                                                                  node_b_addr, addr2nodes)
+        cases, node_default, to_remove = self._switch_build_cases(
+            seq, cmp_lb, jump_table.jumptable_entries, i, node_b_addr, addr2nodes
+        )
         if node_default is None:
             switch_end_addr = node_b_addr
         else:
@@ -535,13 +578,25 @@ class DreamStructurer(StructurerBase):
             switch_end_addr = None
         self._switch_handle_gotos(cases, node_default, switch_end_addr)
 
-        self._make_switch_cases_core(seq, i, node, cmp_expr, cases, node_default, last_stmt.ins_addr, addr2nodes,
-                                     to_remove, node_a=node_a, jumptable_addr=jump_table.addr)
+        self._make_switch_cases_core(
+            seq,
+            i,
+            node,
+            cmp_expr,
+            cases,
+            node_default,
+            last_stmt.ins_addr,
+            addr2nodes,
+            to_remove,
+            node_a=node_a,
+            jumptable_addr=jump_table.addr,
+        )
 
         return True
 
-    def _make_switch_cases_address_computed(self, seq, i, node, addr2nodes: Dict[int,Set[CodeNode]],
-                                            jump_tables: Dict[int,IndirectJump]) -> bool:
+    def _make_switch_cases_address_computed(
+        self, seq, i, node, addr2nodes: Dict[int, Set[CodeNode]], jump_tables: Dict[int, IndirectJump]
+    ) -> bool:
         if node.addr not in jump_tables:
             return False
         jump_table = jump_tables[node.addr]
@@ -576,20 +631,42 @@ class DreamStructurer(StructurerBase):
         else:
             return False
 
-        cases, node_default, to_remove = self._switch_build_cases(seq, cmp_lb, jumptable_entries, default_addr, i,
-                                                                  addr2nodes)
+        cases, node_default, to_remove = self._switch_build_cases(
+            seq, cmp_lb, jumptable_entries, i, default_addr, addr2nodes
+        )
         if node_default is None:
             # there must be a default case
             return False
 
-        self._make_switch_cases_core(seq, i, node, cmp_expr, cases, node_default, node.addr, addr2nodes, to_remove,
-                                     jumptable_addr=jump_table.addr)
+        self._make_switch_cases_core(
+            seq,
+            i,
+            node,
+            cmp_expr,
+            cases,
+            node_default,
+            node.addr,
+            addr2nodes,
+            to_remove,
+            jumptable_addr=jump_table.addr,
+        )
 
         return True
 
-    def _make_switch_cases_core(self, seq, i, node, cmp_expr, cases, node_default, addr, addr2nodes, to_remove,
-                                node_a=None, jumptable_addr=None):
-
+    def _make_switch_cases_core(
+        self,
+        seq,
+        i,
+        node,
+        cmp_expr,
+        cases: ODict,
+        node_default,
+        addr,
+        addr2nodes,
+        to_remove,
+        node_a=None,
+        jumptable_addr=None,
+    ):
         scnode = SwitchCaseNode(cmp_expr, cases, node_default, addr=addr)
         scnode = CodeNode(scnode, node.reaching_condition)
 
@@ -617,8 +694,9 @@ class DreamStructurer(StructurerBase):
         rewriter = JumpTableEntryConditionRewriter(self.cond_proc.jump_table_conds[jumptable_addr])
         rewriter.walk(seq)  # update SequenceNodes in-place
 
-    def _switch_unpack_sequence_node(self, seq: SequenceNode, node_a, node_b_addr: int, jumptable,
-                                     addr2nodes: Dict[int,Set[CodeNode]]) -> Tuple[bool,Optional[CodeNode]]:
+    def _switch_unpack_sequence_node(
+        self, seq: SequenceNode, node_a, node_b_addr: int, jumptable, addr2nodes: Dict[int, Set[CodeNode]]
+    ) -> Tuple[bool, Optional[CodeNode]]:
         """
         We might have already structured the actual body of the switch-case structure into a single Sequence node (node
         A). If that is the case, we un-structure the sequence node in this method.
@@ -643,8 +721,9 @@ class DreamStructurer(StructurerBase):
         # if that is the case, we un-structure it here
         if all(entry_addr in addr2nodes for entry_addr in jumptable_entries):
             return True, node_a
-        elif self._switch_check_existence_of_jumptable_entries(jumptable_entries, node_a_block_addrs,
-                                                               set(addr2nodes.keys()), node_a.addr, node_b_addr):
+        elif self._switch_check_existence_of_jumptable_entries(
+            jumptable_entries, node_a_block_addrs, set(addr2nodes.keys()), node_a.addr, node_b_addr
+        ):
             # unpacking is needed
             for n in node_a.node.nodes:
                 if isinstance(n, ConditionNode):
@@ -696,10 +775,12 @@ class DreamStructurer(StructurerBase):
 
         if cond.op == "And":
             for arg in cond.args:
-                if arg.op == "__eq__" \
-                        and arg.args[0] is jumptable_var \
-                        and isinstance(arg.args[1], claripy.Bits) \
-                        and arg.args[1].concrete:
+                if (
+                    arg.op == "__eq__"
+                    and arg.args[0] is jumptable_var
+                    and isinstance(arg.args[1], claripy.Bits)
+                    and arg.args[1].concrete
+                ):
                     # found it
                     eq_condition = arg
                     remaining_cond = claripy.And(*(arg_ for arg_ in cond.args if arg_ is not arg))
@@ -710,9 +791,7 @@ class DreamStructurer(StructurerBase):
                 # unsupported
                 return None
         elif cond.op == "__eq__":
-            if cond.args[0] is jumptable_var \
-                    and isinstance(cond.args[1], claripy.Bits) \
-                    and cond.args[1].concrete:
+            if cond.args[0] is jumptable_var and isinstance(cond.args[1], claripy.Bits) and cond.args[1].concrete:
                 # found it
                 eq_condition = cond
                 true_node = cond_node.true_node
@@ -731,12 +810,18 @@ class DreamStructurer(StructurerBase):
             # unsupported
             return None
 
-        return CodeNode(ConditionNode(cond_node.addr, claripy.true, remaining_cond, true_node, false_node=false_node),
-                        eq_condition)
+        return CodeNode(
+            ConditionNode(cond_node.addr, claripy.true, remaining_cond, true_node, false_node=false_node), eq_condition
+        )
 
-    def _switch_check_existence_of_jumptable_entries(self, jumptable_entries, node_a_block_addrs: Set[int],
-                                                     known_node_addrs: Set[int], node_a_addr: int,
-                                                     node_b_addr: int) -> bool:
+    def _switch_check_existence_of_jumptable_entries(
+        self,
+        jumptable_entries,
+        node_a_block_addrs: Set[int],
+        known_node_addrs: Set[int],
+        node_a_addr: int,
+        node_b_addr: int,
+    ) -> bool:
         """
         Check if all entries in the given jump table exist in the given set of nodes of a SequenceNode.
 
@@ -757,7 +842,7 @@ class DreamStructurer(StructurerBase):
             if self.function is not None:
                 entry_node = self.function.get_node(entry_addr)
                 if entry_node is not None:
-                    successors = [ ]
+                    successors = []
                     for _, dst, data in self.function.graph.out_edges(entry_node, data=True):
                         if data.get("type", "transition") != "call":
                             successors.append(dst)
@@ -776,7 +861,7 @@ class DreamStructurer(StructurerBase):
         # not sure what is going on...
         return False
 
-    def _switch_find_jumptable_entry_node(self, entry_addr: int, addr2nodes: Dict[int,Set[CodeNode]]) -> Optional[Any]:
+    def _switch_find_jumptable_entry_node(self, entry_addr: int, addr2nodes: Dict[int, Set[CodeNode]]) -> Optional[Any]:
         """
         Find the correct node for a given jump table entry address in addr2nodes.
 
@@ -800,9 +885,9 @@ class DreamStructurer(StructurerBase):
         for _ in range(5):  # we try at most five steps
             if node is None:
                 return None
-            successors = [ ]
+            successors = []
             for _, dst, data in self.function.graph.out_edges(node, data=True):
-                if data.get('type', 'transition') != "call":
+                if data.get("type", "transition") != "call":
                     successors.append(dst)
             if len(successors) != 1:
                 return None
@@ -814,8 +899,15 @@ class DreamStructurer(StructurerBase):
             node = successor
         return None
 
-    def _switch_build_cases(self, seq: SequenceNode, cmp_lb: int, jumptable_entries: List[int], head_node_idx: int,
-                            node_b_addr: int, addr2nodes: Dict[int,Set[CodeNode]]) -> Tuple[Dict,Any,Any]:
+    def _switch_build_cases(
+        self,
+        seq: SequenceNode,
+        cmp_lb: int,
+        jumptable_entries: List[int],
+        head_node_idx: int,
+        node_b_addr: int,
+        addr2nodes: Dict[int, Set[CodeNode]],
+    ) -> Tuple[ODict, Any, Any]:
         """
         Discover all cases for the switch-case structure and build the switch-cases dict.
 
@@ -828,14 +920,14 @@ class DreamStructurer(StructurerBase):
         :return:                    A tuple of (dict of cases, the default node if exists, nodes to remove).
         """
 
-        cases: Dict[Union[int,Tuple[int]],SequenceNode] = { }
+        cases: ODict[Union[int, Tuple[int, ...]], SequenceNode] = OrderedDict()
         to_remove = set()
         node_default = addr2nodes.get(node_b_addr, None)
         if node_default is not None:
             node_default = next(iter(node_default))
 
         entry_addrs_set = set(jumptable_entries)
-        converted_nodes: Dict[int,Any] = { }
+        converted_nodes: Dict[int, Any] = {}
         entry_addr_to_ids = defaultdict(set)
 
         for j, entry_addr in enumerate(jumptable_entries):
@@ -853,10 +945,18 @@ class DreamStructurer(StructurerBase):
             if entry_node is None:
                 # Missing entries. They are probably *after* the entire switch-case construct. Replace it with an empty
                 # Goto node.
-                case_inner_node = ailment.Block(0, 0, statements=[
-                    ailment.Stmt.Jump(None, ailment.Expr.Const(None, None, entry_addr, self.project.arch.bits),
-                                      ins_addr=0, stmt_idx=0)
-                ])
+                case_inner_node = ailment.Block(
+                    0,
+                    0,
+                    statements=[
+                        ailment.Stmt.Jump(
+                            None,
+                            ailment.Expr.Const(None, None, entry_addr, self.project.arch.bits),
+                            ins_addr=0,
+                            stmt_idx=0,
+                        )
+                    ],
+                )
                 case_node = SequenceNode(0, nodes=[CodeNode(case_inner_node, claripy.true)])
                 converted_nodes[entry_addr] = case_node
                 continue
@@ -869,10 +969,18 @@ class DreamStructurer(StructurerBase):
                 # it's jumping to a block that dominates the head. it's likely to be an optimized continue; statement
                 # in a switch-case wrapped inside a while loop.
                 # replace it with an empty Goto node
-                case_inner_node = ailment.Block(0, 0, statements=[
-                    ailment.Stmt.Jump(None, ailment.Expr.Const(None, None, entry_addr, self.project.arch.bits),
-                                      ins_addr=0, stmt_idx=0)
-                ])
+                case_inner_node = ailment.Block(
+                    0,
+                    0,
+                    statements=[
+                        ailment.Stmt.Jump(
+                            None,
+                            ailment.Expr.Const(None, None, entry_addr, self.project.arch.bits),
+                            ins_addr=0,
+                            stmt_idx=0,
+                        )
+                    ],
+                )
                 case_node = SequenceNode(0, nodes=[CodeNode(case_inner_node, claripy.true)])
                 converted_nodes[entry_addr] = case_node
                 continue
@@ -885,17 +993,17 @@ class DreamStructurer(StructurerBase):
                 if guarded_nodes is None:
                     guarded_nodes = {node_ for _, node_, _ in guarded_node_candidates}
                 else:
-                    guarded_nodes = guarded_nodes.intersection(
-                        {node_ for _, node_, _ in guarded_node_candidates})
+                    guarded_nodes = guarded_nodes.intersection({node_ for _, node_, _ in guarded_node_candidates})
 
             if guarded_nodes is not None:
                 # keep the topological order of nodes in Sequence node
-                sorted_guarded_nodes = [node_ for node_ in seq.nodes[entry_node_idx + 1:] if node_ in guarded_nodes]
+                sorted_guarded_nodes = [node_ for node_ in seq.nodes[entry_node_idx + 1 :] if node_ in guarded_nodes]
                 for node_ in sorted_guarded_nodes:
                     if node_ is not entry_node and node_.addr not in entry_addrs_set:
                         # fix reaching condition
                         reaching_condition_subexprs = {
-                            ex for ex in get_ast_subexprs(node_.reaching_condition)}.difference(set(cond_subexprs))
+                            ex for ex in get_ast_subexprs(node_.reaching_condition)
+                        }.difference(set(cond_subexprs))
                         new_reaching_condition = claripy.And(*reaching_condition_subexprs)
                         new_node = CodeNode(node_.node, new_reaching_condition)
                         case_node.add_node(new_node)
@@ -921,6 +1029,9 @@ class DreamStructurer(StructurerBase):
 
             self._new_sequences.append(converted_node)
 
+        # reorganize cases to handle fallthroughs
+        cases = self._reorganize_switch_cases(cases)
+
         return cases, node_default, to_remove
 
     #
@@ -928,14 +1039,13 @@ class DreamStructurer(StructurerBase):
     #
 
     def _make_ites(self, seq):
-
         # search for a == ^a pairs
 
         while True:
             break_hard = False
             for i in range(len(seq.nodes)):
                 node_0 = seq.nodes[i]
-                if not type(node_0) is CodeNode:
+                if type(node_0) is not CodeNode:
                     continue
                 rcond_0 = node_0.reaching_condition
                 if rcond_0 is None:
@@ -944,7 +1054,7 @@ class DreamStructurer(StructurerBase):
                     continue
                 for j in range(i + 1, len(seq.nodes)):
                     node_1 = seq.nodes[j]
-                    if not type(node_1) is CodeNode:
+                    if type(node_1) is not CodeNode:
                         continue
                     if node_0 is node_1:
                         continue
@@ -963,7 +1073,6 @@ class DreamStructurer(StructurerBase):
                 break
 
     def _structure_common_subexpression_conditions(self, seq):
-
         # use common subexpressions to structure nodes and create more if-then-else instances
 
         i = 0
@@ -984,8 +1093,7 @@ class DreamStructurer(StructurerBase):
                     continue
                 candidates = self._nodes_guarded_by_common_subexpr(seq, common_subexpr, i + 1)
                 if candidates:
-                    candidates.insert(0,
-                                      (i, node_0, subexprs_0))
+                    candidates.insert(0, (i, node_0, subexprs_0))
                     new_node = self._create_seq_node_guarded_by_common_subexpr(common_subexpr, candidates)
                     self._new_sequences.append(new_node)
 
@@ -993,7 +1101,7 @@ class DreamStructurer(StructurerBase):
                     for idx, _, _ in candidates:
                         seq.nodes[idx] = None
                     seq.nodes[i] = CodeNode(new_node, common_subexpr)
-                    seq.nodes = [ n for n in seq.nodes if n is not None ]
+                    seq.nodes = [n for n in seq.nodes if n is not None]
                     structured = True
                     break
 
@@ -1002,13 +1110,12 @@ class DreamStructurer(StructurerBase):
 
     @staticmethod
     def _nodes_guarded_by_common_subexpr(seq, common_subexpr, starting_idx):
-
         candidates = []
 
         if common_subexpr is claripy.true:
-            return [ ]
+            return []
         for j, node_1 in enumerate(seq.nodes[starting_idx:]):
-            rcond_1 = getattr(node_1, 'reaching_condition', None)
+            rcond_1 = getattr(node_1, "reaching_condition", None)
             if rcond_1 is None:
                 continue
             subexprs_1 = list(get_ast_subexprs(rcond_1))
@@ -1020,8 +1127,7 @@ class DreamStructurer(StructurerBase):
 
     @staticmethod
     def _create_seq_node_guarded_by_common_subexpr(common_subexpr, candidates):
-
-        new_nodes = [ ]
+        new_nodes = []
 
         for _, node, subexprs in candidates:
             # :)
@@ -1039,18 +1145,21 @@ class DreamStructurer(StructurerBase):
         for i in range(len(seq.nodes)):
             node = seq.nodes[i]
 
-            if isinstance(node, CodeNode) and \
-                    node.reaching_condition is not None and \
-                    node.reaching_condition.op == "Or" and \
-                    node.node in self.cond_proc.guarding_conditions:
+            if (
+                isinstance(node, CodeNode)
+                and node.reaching_condition is not None
+                and node.reaching_condition.op == "Or"
+                and node.node in self.cond_proc.guarding_conditions
+            ):
                 guarding_condition = self.cond_proc.guarding_conditions[node.node]
                 # the op of guarding condition is always "Or"
-                if len(guarding_condition.args) < len(node.reaching_condition.args) and \
-                        guarding_condition.depth < node.reaching_condition.depth:
+                if (
+                    len(guarding_condition.args) < len(node.reaching_condition.args)
+                    and guarding_condition.depth < node.reaching_condition.depth
+                ):
                     node.reaching_condition = guarding_condition
 
     def _make_condition_nodes(self, seq):
-
         # make all conditionally-reachable nodes ConditionNodes
         for i in range(len(seq.nodes)):
             node = seq.nodes[i]
@@ -1065,8 +1174,7 @@ class DreamStructurer(StructurerBase):
                         cond = claripy.And(node.reaching_condition, node.node.condition)
                         new_node = CodeNode(ConditionalBreakNode(node.node.addr, cond, node.node.target), None)
                     else:
-                        new_node = ConditionNode(node.addr, None, node.reaching_condition, node,
-                                                 None)
+                        new_node = ConditionNode(node.addr, None, node.reaching_condition, node, None)
                     seq.nodes[i] = new_node
 
     @staticmethod
@@ -1077,7 +1185,6 @@ class DreamStructurer(StructurerBase):
         CascadingConditionTransformer(seq)
 
     def _make_ite(self, seq, node_0, node_1):
-
         # ensure order
         if node_0.addr > node_1.addr:
             node_0, node_1 = node_1, node_0
@@ -1092,14 +1199,12 @@ class DreamStructurer(StructurerBase):
         node_1_.reaching_condition = None
 
         node_0_kids = self._nodes_guarded_by_common_subexpr(seq, node_0.reaching_condition, node_0_pos + 1)
-        node_0_kids.insert(0, (node_0_pos, node_0_, [ node_0.reaching_condition ]))
+        node_0_kids.insert(0, (node_0_pos, node_0_, [node_0.reaching_condition]))
         node_1_kids = self._nodes_guarded_by_common_subexpr(seq, node_1.reaching_condition, node_1_pos + 1)
-        node_1_kids.insert(0, (node_1_pos, node_1_, [ node_1.reaching_condition ]))
+        node_1_kids.insert(0, (node_1_pos, node_1_, [node_1.reaching_condition]))
 
-        new_node_0 = self._create_seq_node_guarded_by_common_subexpr(node_0.reaching_condition,
-                                                                     node_0_kids)
-        new_node_1 = self._create_seq_node_guarded_by_common_subexpr(node_1.reaching_condition,
-                                                                     node_1_kids)
+        new_node_0 = self._create_seq_node_guarded_by_common_subexpr(node_0.reaching_condition, node_0_kids)
+        new_node_1 = self._create_seq_node_guarded_by_common_subexpr(node_1.reaching_condition, node_1_kids)
 
         self._new_sequences.append(new_node_0)
         self._new_sequences.append(new_node_1)
@@ -1110,9 +1215,8 @@ class DreamStructurer(StructurerBase):
         for idx, _, _ in node_0_kids + node_1_kids:
             seq.nodes[idx] = None
 
-        seq.insert_node(pos, ConditionNode(seq_addr, None, node_0.reaching_condition, new_node_0,
-                                           new_node_1))
-        seq.nodes = [ n for n in seq.nodes if n is not None ]
+        seq.insert_node(pos, ConditionNode(seq_addr, None, node_0.reaching_condition, new_node_0, new_node_1))
+        seq.nodes = [n for n in seq.nodes if n is not None]
 
 
 # delayed import

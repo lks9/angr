@@ -18,17 +18,19 @@ class HooksMixin(SuccessorsMixin, ProcedureMixin):
     - procedure:        A SimProcedure instance to force-run instead of consulting the current hooks
     - ret_to:           An address to force-return-to at the end of the procedure
     """
+
     def _lookup_hook(self, state, procedure):
-        # TODO this is moderately controversial. If the jumpkind was NoHook and the user provided the procedure argument, which takes precedence?
+        # TODO this is moderately controversial. If the jumpkind was NoHook and the user provided the procedure
+        # argument, which takes precedence?
         # tentative guess: passed argument takes priority
         if procedure is not None:
             return procedure
 
         # we have at this point entered the next step - we should check the "previous" jumpkind
-        if state.history and state.history.parent and state.history.parent.jumpkind == 'Ijk_NoHook':
+        if state.history and state.history.parent and state.history.parent.jumpkind == "Ijk_NoHook":
             return None
 
-        if not type(state._ip) is int and state._ip.symbolic:
+        if type(state._ip) is not int and state._ip.symbolic:
             # symbolic IP is not supported
             return None
 
@@ -37,7 +39,7 @@ class HooksMixin(SuccessorsMixin, ProcedureMixin):
         if procedure is not None:
             return procedure
 
-        if not state.arch.name.startswith('ARM') or addr & 1 != 1:
+        if not state.arch.name.startswith("ARM") or addr & 1 != 1:
             return None
 
         procedure = self.project._sim_procedures.get(addr - 1, None)
@@ -56,6 +58,10 @@ class HooksMixin(SuccessorsMixin, ProcedureMixin):
         if isinstance(procedure.addr, SootAddressDescriptor):
             l.debug("Running %s (originally at %r)", repr(procedure), procedure.addr)
         else:
-            l.debug("Running %s (originally at %s)", repr(procedure), procedure.addr if procedure.addr is None else hex(procedure.addr))
+            l.debug(
+                "Running %s (originally at %s)",
+                repr(procedure),
+                procedure.addr if procedure.addr is None else hex(procedure.addr),
+            )
 
         return self.process_procedure(state, successors, procedure, **kwargs)

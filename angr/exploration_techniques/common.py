@@ -15,7 +15,10 @@ def condition_to_lambda(condition, default=False):
                         at, or None if no addresses were provided statically.
     """
     if condition is None:
-        condition_function = lambda state: default
+
+        def condition_function(state):
+            return default
+
         static_addrs = set()
 
     elif isinstance(condition, int):
@@ -23,6 +26,7 @@ def condition_to_lambda(condition, default=False):
 
     elif isinstance(condition, (tuple, set, list)):
         static_addrs = set(condition)
+
         def condition_function(state):
             if state.addr in static_addrs:
                 # returning {state.addr} instead of True to properly handle find/avoid conflicts
@@ -40,10 +44,13 @@ def condition_to_lambda(condition, default=False):
             except (AngrError, SimError):
                 return False
 
-    elif hasattr(condition, '__call__'):
+    elif hasattr(condition, "__call__"):
         condition_function = condition
         static_addrs = None
     else:
-        raise AngrExplorationTechniqueError("ExplorationTechnique is unable to convert given type (%s) to a callable condition function." % condition.__class__)
+        raise AngrExplorationTechniqueError(
+            "ExplorationTechnique is unable to convert given type (%s) to a callable condition function."
+            % condition.__class__
+        )
 
     return condition_function, static_addrs

@@ -1,7 +1,6 @@
 # pylint:disable=unused-import
-from ..models import DbKnowledgeBase, DbComment
+from ..models import DbComment
 from ...knowledge_plugins.comments import Comments
-from ...knowledge_base import KnowledgeBase
 
 
 class CommentsSerializer:
@@ -20,10 +19,14 @@ class CommentsSerializer:
         """
 
         for addr, comment in comments.items():
-            db_comment = session.query(DbComment).filter_by(
-                kb=db_kb,
-                addr=addr,
-            ).scalar()
+            db_comment = (
+                session.query(DbComment)
+                .filter_by(
+                    kb=db_kb,
+                    addr=addr,
+                )
+                .scalar()
+            )
             if db_comment is not None:
                 if comment == db_comment.comment:
                     continue

@@ -16,16 +16,13 @@ try:
 except ImportError:
     tracer = None
 
-bin_location = os.path.join(
-    os.path.dirname(os.path.realpath(__file__)), "..", "..", "binaries"
-)
-bin_priv_location = os.path.join(
-    os.path.dirname(os.path.realpath(__file__)), "..", "..", "binaries-private"
-)
+bin_location = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "binaries")
+bin_priv_location = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "binaries-private")
 
 if not os.path.isdir(bin_location):
     raise Exception(
-        "Can't find the angr/binaries repo for holding testcases. It should be cloned into the same folder as the rest of your angr modules."
+        "Can't find the angr/binaries repo for holding testcases. "
+        "It should be cloned into the same folder as the rest of your angr modules."
     )
 
 
@@ -36,8 +33,7 @@ def broken(func):
 def requires_binaries_private(func):
     return skipIf(
         not os.path.exists(
-            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "binaries-private"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "binaries-private"),
         ),
         "Skip this test since we do not have the binaries-private repo cloned on Travis CI.",
     )(func)
@@ -45,20 +41,12 @@ def requires_binaries_private(func):
 
 def slow_test(func):
     func.speed = "slow"
-    slow_test_env = (
-        os.environ["SKIP_SLOW_TESTS"].lower()
-        if "SKIP_SLOW_TESTS" in os.environ
-        else ""
-    )
-    return skipIf(
-        slow_test_env == "true" or slow_test_env == "1", "Skipping slow test"
-    )(func)
+    slow_test_env = os.environ["SKIP_SLOW_TESTS"].lower() if "SKIP_SLOW_TESTS" in os.environ else ""
+    return skipIf(slow_test_env == "true" or slow_test_env == "1", "Skipping slow test")(func)
 
 
 def skip_if_not_linux(func):
-    return skipUnless(sys.platform.startswith("linux"), "Skipping Linux Test Cases")(
-        func
-    )
+    return skipUnless(sys.platform.startswith("linux"), "Skipping Linux Test Cases")(func)
 
 
 TRACE_VERSION = 1
@@ -108,13 +96,13 @@ def compile_c(c_code: str, cflags: Optional[Sequence[str]], silent: bool = False
     try:
         dst = NamedTemporaryFile(delete=False)
         dst.close()
-        src = NamedTemporaryFile(mode='x', delete=False, suffix='.c')
+        src = NamedTemporaryFile(mode="x", delete=False, suffix=".c")
         src.write(c_code)
         src.close()
 
-        call_args = ['cc'] + (cflags or []) + ['-o', dst.name, src.name]
-        l.debug('Compiling with: %s', ' '.join(call_args))
-        l.debug('Source:\n%s', c_code)
+        call_args = ["cc"] + (cflags or []) + ["-o", dst.name, src.name]
+        l.debug("Compiling with: %s", " ".join(call_args))
+        l.debug("Source:\n%s", c_code)
         out = subprocess.DEVNULL if silent else None
         subprocess.check_call(call_args, stderr=out, stdout=out)
         return dst
@@ -133,10 +121,8 @@ def has_32_bit_compiler_support() -> bool:
     Check if we are able to compile a 32-bit binary
     """
     try:
-        binary = compile_c("#include <stdlib.h>\nint main() { return 0; }", ['-m32'], True)
+        binary = compile_c("#include <stdlib.h>\nint main() { return 0; }", ["-m32"], True)
         os.remove(binary.name)
         return True
     except subprocess.CalledProcessError:
         return False
-
-

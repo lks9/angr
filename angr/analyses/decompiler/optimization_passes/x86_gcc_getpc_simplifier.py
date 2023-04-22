@@ -13,8 +13,8 @@ class X86GccGetPcSimplifier(OptimizationPass):
     Simplifies __x86.get_pc_thunk calls.
     """
 
-    ARCHES = ['X86']
-    PLATFORMS = ['linux']
+    ARCHES = ["X86"]
+    PLATFORMS = ["linux"]
     STAGE = OptimizationPassStage.AFTER_SINGLE_BLOCK_SIMPLIFICATION
     NAME = "Simplify getpc()"
     DESCRIPTION = __doc__.strip()
@@ -24,19 +24,17 @@ class X86GccGetPcSimplifier(OptimizationPass):
         self.analyze()
 
     def _check(self):
-
         getpc_calls = self._find_getpc_calls()
 
         return bool(getpc_calls), {
-            'getpc_calls': getpc_calls,
+            "getpc_calls": getpc_calls,
         }
 
     def _analyze(self, cache=None):
-
         getpc_calls = None
 
         if cache is not None:
-            getpc_calls = cache.get('getpc_calls', None)
+            getpc_calls = cache.get("getpc_calls", None)
 
         if getpc_calls is None:
             getpc_calls = self._find_getpc_calls()
@@ -46,7 +44,6 @@ class X86GccGetPcSimplifier(OptimizationPass):
 
         # update each block
         for block_key, stmt_idx, getpc_reg, getpc_reg_value in getpc_calls:
-
             pcreg_offset = self.project.arch.registers[getpc_reg][0]
 
             old_block = self.blocks_by_addr_and_idx[block_key]
@@ -63,7 +60,7 @@ class X86GccGetPcSimplifier(OptimizationPass):
                 block.statements = block.statements[: stmt_idx - 1] + block.statements[stmt_idx:]
             self._update_block(old_block, block)
 
-    def _find_getpc_calls(self) -> List[Tuple[Any,int,str,int]]:
+    def _find_getpc_calls(self) -> List[Tuple[Any, int, str, int]]:
         """
         Find all blocks that are calling __x86.get_pc_thunk functions.
 
@@ -71,15 +68,17 @@ class X86GccGetPcSimplifier(OptimizationPass):
                     value of the pc-storing register).
         """
 
-        results = [ ]
+        results = []
         for key, block in self._blocks_by_addr_and_idx.items():
-            if block.statements \
-                    and isinstance(block.statements[-1], ailment.Stmt.Call) \
-                    and isinstance(block.statements[-1].target, ailment.Expr.Const):
+            if (
+                block.statements
+                and isinstance(block.statements[-1], ailment.Stmt.Call)
+                and isinstance(block.statements[-1].target, ailment.Expr.Const)
+            ):
                 call_func_addr = block.statements[-1].target.value
                 call_func = self.kb.functions.get_by_addr(call_func_addr)
-                if 'get_pc' in call_func.info:
+                if "get_pc" in call_func.info:
                     results.append(
-                        (key, len(block.statements) - 1, call_func.info['get_pc'], block.addr + block.original_size),
+                        (key, len(block.statements) - 1, call_func.info["get_pc"], block.addr + block.original_size),
                     )
         return results

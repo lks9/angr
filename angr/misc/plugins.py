@@ -3,6 +3,7 @@ from typing import Type, Dict, Optional, List, TYPE_CHECKING
 from angr.errors import AngrNoPluginError
 
 import logging
+
 l = logging.getLogger(name=__name__)
 
 
@@ -31,10 +32,10 @@ class PluginHub:
     #   Class methods for registration
     #
 
-    _presets = None # not a dict so different subclasses don't share instances
+    _presets = None  # not a dict so different subclasses don't share instances
 
     @classmethod
-    def register_default(cls, name, plugin_cls, preset='default'):
+    def register_default(cls, name, plugin_cls, preset="default"):
         if cls._presets is None or preset not in cls._presets:
             l.error("Preset %s does not exist yet...", preset)
             return
@@ -68,7 +69,7 @@ class PluginHub:
             if name not in self._active_plugins:
                 self.register_plugin(name, plugin)
 
-    def __getattr__(self, name: str) -> 'SimStatePlugin':
+    def __getattr__(self, name: str) -> "SimStatePlugin":
         try:
             return self.get_plugin(name)
         except AngrNoPluginError:
@@ -145,7 +146,7 @@ class PluginHub:
     #   Methods for managing the current active plugins
     #
 
-    def get_plugin(self, name: str) -> 'SimStatePlugin':
+    def get_plugin(self, name: str) -> "SimStatePlugin":
         """
         Get the plugin named ``name``. If no such plugin is currently active, try to activate a new
         one using the current preset.
@@ -166,7 +167,7 @@ class PluginHub:
         else:
             raise AngrNoPluginError("No such plugin: %s" % name)
 
-    def _init_plugin(self, plugin_cls: Type['SimStatePlugin']) -> 'SimStatePlugin':  # pylint: disable=no-self-use
+    def _init_plugin(self, plugin_cls: Type["SimStatePlugin"]) -> "SimStatePlugin":  # pylint: disable=no-self-use
         """
         Perform any initialization actions on plugin before it is added to the list of active plugins.
 
@@ -205,14 +206,16 @@ class PluginHub:
 class PluginPreset:
     """
     A plugin preset object contains a mapping from name to a plugin class.
-    A preset can be active on a hub, which will cause it to handle requests for plugins which are not already present on the hub.
+    A preset can be active on a hub, which will cause it to handle requests for plugins which are not already present
+    on the hub.
 
     Unlike Plugins and PluginHubs, instances of PluginPresets are defined on the module level for individual presets.
-    You should register the preset instance with a hub to allow plugins to easily add themselves to the preset without an explicit reference to the preset itself.
+    You should register the preset instance with a hub to allow plugins to easily add themselves to the preset without
+    an explicit reference to the preset itself.
     """
 
     def __init__(self):
-        self._default_plugins: Dict[str, Type['SimStatePlugin']] = {}
+        self._default_plugins: Dict[str, Type["SimStatePlugin"]] = {}
 
     def activate(self, hub):  # pylint:disable=no-self-use,unused-argument
         """
@@ -238,7 +241,7 @@ class PluginPreset:
         """
         return self._default_plugins.keys()
 
-    def request_plugin(self, name: str) -> Type['SimStatePlugin']:
+    def request_plugin(self, name: str) -> Type["SimStatePlugin"]:
         """
         Return the plugin class which is registered under the name ``name``, or raise NoPlugin if
         the name isn't available.
@@ -272,9 +275,9 @@ class PluginVendor(PluginHub):
 
     def __dir__(self):
         x = super().__dir__()
-        x.remove('release_plugin')
-        x.remove('register_plugin')
-        x.remove('has_plugin')
+        x.remove("release_plugin")
+        x.remove("register_plugin")
+        x.remove("has_plugin")
         return x
 
 
@@ -282,7 +285,9 @@ class VendorPreset(PluginPreset):
     """
     A specialized preset class for use with the PluginVendor.
     """
+
     ...
+
 
 if TYPE_CHECKING:
     from ..state_plugins import SimStatePlugin

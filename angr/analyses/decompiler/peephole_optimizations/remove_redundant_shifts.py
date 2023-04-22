@@ -7,10 +7,9 @@ class RemoveRedundantShifts(PeepholeOptimizationExprBase):
     __slots__ = ()
 
     NAME = "Remove redundant bitshifts"
-    expr_classes = (BinaryOp, )  # all expressions are allowed
+    expr_classes = (BinaryOp,)  # all expressions are allowed
 
     def optimize(self, expr: BinaryOp):
-
         # (expr << N) >> N  ==> Convert((M-N)->M, Convert(M->(M-N), expr))
         if expr.op in ("Shr", "Sar") and isinstance(expr.operands[1], Const):
             expr_a = expr.operands[0]
@@ -36,5 +35,10 @@ class RemoveRedundantShifts(PeepholeOptimizationExprBase):
                         **expr.tags,
                     )
                     return conv_expr
+
+        # expr << 0  ==>  expr
+        # expr >> 0  ==>  expr
+        if expr.op in {"Shl", "Shr", "Sar"} and isinstance(expr.operands[1], Const) and expr.operands[1].value == 0:
+            return expr.operands[0]
 
         return None

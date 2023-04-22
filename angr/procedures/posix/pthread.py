@@ -2,6 +2,7 @@ import angr
 
 # pylint: disable=arguments-differ,unused-argument,no-self-use,inconsistent-return-statements
 
+
 ######################################
 # pthread_create
 # simulates the new thread as an equally viable branch of symbolic execution
@@ -11,7 +12,7 @@ class pthread_create(angr.SimProcedure):
 
     # pylint: disable=unused-argument,arguments-differ
     def run(self, thread, attr, start_routine, arg):
-        self.call(start_routine, (arg,), 'terminate_thread', prototype='void *start_routine(void*)')
+        self.call(start_routine, (arg,), "terminate_thread", prototype="void *start_routine(void*)")
         return 0
 
     def terminate_thread(self, thread, attr, start_routine, arg):
@@ -34,8 +35,8 @@ class pthread_create(angr.SimProcedure):
         retaddr = state.memory.load(state.regs.sp, size=self.arch.bytes)
 
         all_exits = [
-            {'address': callfunc, 'jumpkind': 'Ijk_Call', 'namehint': 'thread_entry'},
-            {'address': retaddr, 'jumpkind': 'Ijk_Ret', 'namehint': None},
+            {"address": callfunc, "jumpkind": "Ijk_Call", "namehint": "thread_entry"},
+            {"address": retaddr, "jumpkind": "Ijk_Ret", "namehint": None},
         ]
 
         return all_exits
@@ -45,6 +46,7 @@ class pthread_create(angr.SimProcedure):
 # pthread_cond_signal
 # a no-op
 ######################################
+
 
 class pthread_cond_signal(angr.SimProcedure):
     def run(self, arg):
@@ -56,6 +58,7 @@ class pthread_cond_signal(angr.SimProcedure):
 # also a no-op
 ######################################
 
+
 class pthread_mutex_lock(angr.SimProcedure):
     def run(self, arg):
         pass
@@ -66,6 +69,7 @@ class pthread_mutex_lock(angr.SimProcedure):
 # also a no-op
 ######################################
 
+
 class pthread_mutex_unlock(angr.SimProcedure):
     def run(self, arg):
         pass
@@ -74,6 +78,7 @@ class pthread_mutex_unlock(angr.SimProcedure):
 ######################################
 # pthread_once
 ######################################
+
 
 class pthread_once(angr.SimProcedure):
     def run(self, control, func):
@@ -85,7 +90,7 @@ class pthread_once(angr.SimProcedure):
 
         controlword |= 2
         self.state.mem[control].char = controlword
-        self.call(func, (), 'retsite', prototype='void x()')
+        self.call(func, (), "retsite", prototype="void x()")
 
     def retsite(self, control, func):
         return 0

@@ -1,7 +1,6 @@
 # pylint:disable=unused-import
-from ..models import DbKnowledgeBase, DbLabel
+from ..models import DbLabel
 from ...knowledge_plugins.labels import Labels
-from ...knowledge_base import KnowledgeBase
 
 
 class LabelsSerializer:
@@ -20,10 +19,14 @@ class LabelsSerializer:
         """
 
         for addr, name in labels.items():
-            db_label = session.query(DbLabel).filter_by(
-                kb=db_kb,
-                addr=addr,
-            ).scalar()
+            db_label = (
+                session.query(DbLabel)
+                .filter_by(
+                    kb=db_kb,
+                    addr=addr,
+                )
+                .scalar()
+            )
             if db_label is not None:
                 if name == db_label.name:
                     continue
